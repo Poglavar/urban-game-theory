@@ -32,7 +32,6 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze }) => {
         const initializeMap = async () => {
             try {
                 const L = (await import('leaflet')).default;
-                // Import CSS using dynamic import
                 await import('leaflet/dist/leaflet.css');
 
                 // Initialize map
@@ -79,7 +78,7 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze }) => {
                         console.log('Fetched buildings:', data);
 
                         // Process each building
-                        data.elements.forEach((building: any) => {
+                        data.elements.forEach((building: any, index: number) => {
                             if (!building.geometry || building.geometry.length === 0) return;
 
                             // Calculate center point of the building

@@ -9,7 +9,6 @@ import type { Parcel } from "~~/types/parcel";
 export default function Home() {
   const { address } = useAccount();
   const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [parcels, setParcels] = useState<Parcel[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 

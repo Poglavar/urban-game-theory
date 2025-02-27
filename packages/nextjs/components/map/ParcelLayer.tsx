@@ -1,7 +1,7 @@
-import type { FC } from 'react';
-import { useEffect } from 'react';
+import React, { type FC, useEffect } from 'react';
 import type { Map as LeafletMap } from 'leaflet';
 import L from 'leaflet';
+import { useAccount } from 'wagmi';
 import type { Parcel } from '~~/types/parcel';
 
 interface ParcelLayerProps {
@@ -11,6 +11,8 @@ interface ParcelLayerProps {
 }
 
 const ParcelLayer: FC<ParcelLayerProps> = ({ map, parcels = [], onParcelClick }) => {
+    const { address } = useAccount();
+
     useEffect(() => {
         if (!map || !parcels.length) return;
 
