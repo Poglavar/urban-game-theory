@@ -6,7 +6,7 @@ import { AddressLogsTab } from "./AddressLogsTab";
 import { AddressStorageTab } from "./AddressStorageTab";
 import { PaginationButton } from "./PaginationButton";
 import { TransactionsTable } from "./TransactionsTable";
-import { createPublicClient, http } from "viem";
+import { Block, Transaction, createPublicClient, http } from "viem";
 import { hardhat } from "viem/chains";
 import { useFetchBlocks } from "~~/hooks/scaffold-eth";
 
@@ -39,12 +39,10 @@ export const ContractTabs = ({ address, contractData }: PageProps) => {
     checkIsContract();
   }, [address]);
 
-  const filteredBlocks = blocks.filter(block =>
-    block.transactions.some(tx => {
-      if (typeof tx === "string") {
-        return false;
-      }
-      return tx.from.toLowerCase() === address.toLowerCase() || tx.to?.toLowerCase() === address.toLowerCase();
+  const filteredBlocks = blocks.filter((block: Block) =>
+    block.transactions.some((tx: Transaction<bigint, number, boolean> | `0x${string}`) => {
+      if (typeof tx === 'string') return false;
+      return (tx.from.toLowerCase() === address.toLowerCase() || tx.to?.toLowerCase() === address.toLowerCase());
     }),
   );
 

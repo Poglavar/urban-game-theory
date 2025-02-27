@@ -1,71 +1,117 @@
 "use client";
 
-import Link from "next/link";
-import type { NextPage } from "next";
+import { useState } from "react";
 import { useAccount } from "wagmi";
-import { BugAntIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
-import { Address } from "~~/components/scaffold-eth";
+import { RainbowKitCustomConnectButton } from "~~/components/scaffold-eth";
+import MapView from "~~/components/map/MapView";
+import type { Parcel } from "~~/types/parcel";
 
-const Home: NextPage = () => {
-  const { address: connectedAddress } = useAccount();
+export default function Home() {
+  const { address } = useAccount();
+  const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [parcels, setParcels] = useState<Parcel[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  // Placeholder for controls component
+  const ControlsPanel = () => (
+    <div className="flex flex-col gap-4 p-4">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold">Controls</h2>
+        <RainbowKitCustomConnectButton />
+      </div>
+      <button
+        className={`btn ${isAnalyzing ? 'btn-disabled' : 'btn-primary'}`}
+        onClick={() => {
+          setIsAnalyzing(true);
+          // @ts-ignore
+          window.analyzeArea?.();
+        }}
+      >
+        {isAnalyzing ? 'Analyzing...' : 'Analyze Area'}
+      </button>
+      <button
+        className="btn btn-secondary"
+        onClick={() => {
+          // TODO: Implement create proposal functionality
+          console.log("Create proposal clicked");
+        }}
+      >
+        Create Proposal
+      </button>
+    </div>
+  );
+
+  // Placeholder for list component
+  const ListPanel = () => (
+    <div className="p-4">
+      <h2 className="text-2xl font-bold mb-4">Your Parcels</h2>
+      {address ? (
+        parcels.length > 0 ? (
+          <ul className="space-y-2">
+            {parcels.map(parcel => (
+              <li
+                key={parcel.id}
+                className={`p-2 rounded cursor-pointer ${selectedParcelId === parcel.id ? 'bg-primary text-white' : 'bg-base-200'}`}
+                onClick={() => setSelectedParcelId(parcel.id)}
+              >
+                Parcel {parcel.id}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>No parcels found</p>
+        )
+      ) : (
+        <p>Connect your wallet to view your parcels</p>
+      )}
+    </div>
+  );
+
+  // Placeholder for details component
+  const DetailsPanel = () => (
+    <div className="p-4">
+      <h2 className="text-2xl font-bold mb-4">Details</h2>
+      {selectedParcelId ? (
+        <div className="space-y-2">
+          <p>Selected Parcel: {selectedParcelId}</p>
+          <h3 className="text-xl font-semibold mt-4">Offers</h3>
+          <p>No offers yet</p>
+          <h3 className="text-xl font-semibold mt-4">Proposals</h3>
+          <p>No proposals yet</p>
+        </div>
+      ) : (
+        <p>No parcel selected</p>
+      )}
+    </div>
+  );
 
   return (
-    <>
-      <div className="flex items-center flex-col flex-grow pt-10">
-        <div className="px-5">
-          <h1 className="text-center">
-            <span className="block text-2xl mb-2">Welcome to</span>
-            <span className="block text-4xl font-bold">Scaffold-ETH 2</span>
-          </h1>
-          <div className="flex justify-center items-center space-x-2 flex-col sm:flex-row">
-            <p className="my-2 font-medium">Connected Address:</p>
-            <Address address={connectedAddress} />
-          </div>
-          <p className="text-center text-lg">
-            Get started by editing{" "}
-            <code className="italic bg-base-300 text-base font-bold max-w-full break-words break-all inline-block">
-              packages/nextjs/app/page.tsx
-            </code>
-          </p>
-          <p className="text-center text-lg">
-            Edit your smart contract{" "}
-            <code className="italic bg-base-300 text-base font-bold max-w-full break-words break-all inline-block">
-              YourContract.sol
-            </code>{" "}
-            in{" "}
-            <code className="italic bg-base-300 text-base font-bold max-w-full break-words break-all inline-block">
-              packages/hardhat/contracts
-            </code>
-          </p>
-        </div>
-
-        <div className="flex-grow bg-base-300 w-full mt-16 px-8 py-12">
-          <div className="flex justify-center items-center gap-12 flex-col sm:flex-row">
-            <div className="flex flex-col bg-base-100 px-10 py-10 text-center items-center max-w-xs rounded-3xl">
-              <BugAntIcon className="h-8 w-8 fill-secondary" />
-              <p>
-                Tinker with your smart contract using the{" "}
-                <Link href="/debug" passHref className="link">
-                  Debug Contracts
-                </Link>{" "}
-                tab.
-              </p>
-            </div>
-            <div className="flex flex-col bg-base-100 px-10 py-10 text-center items-center max-w-xs rounded-3xl">
-              <MagnifyingGlassIcon className="h-8 w-8 fill-secondary" />
-              <p>
-                Explore your local transactions with the{" "}
-                <Link href="/blockexplorer" passHref className="link">
-                  Block Explorer
-                </Link>{" "}
-                tab.
-              </p>
-            </div>
-          </div>
-        </div>
+    <div className="flex flex-wrap h-screen">
+      {/* Upper Left - Map */}
+      <div className="w-1/2 h-1/2 border-r border-b border-base-300">
+        <MapView
+          onParcelSelect={setSelectedParcelId}
+          onAnalyze={() => {
+            setIsAnalyzing(false);
+          }}
+        />
       </div>
-    </>
-  );
-};
 
-export default Home;
+      {/* Upper Right - Controls */}
+      <div className="w-1/2 h-1/2 border-b border-base-300">
+        <ControlsPanel />
+      </div>
+
+      {/* Lower Left - List */}
+      <div className="w-1/2 h-1/2 border-r border-base-300 overflow-auto">
+        <ListPanel />
+      </div>
+
+      {/* Lower Right - Details */}
+      <div className="w-1/2 h-1/2 overflow-auto">
+        <DetailsPanel />
+      </div>
+    </div>
+  );
+}
