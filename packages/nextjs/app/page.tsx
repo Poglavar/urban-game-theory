@@ -4,10 +4,18 @@ import { useState, useRef, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { RainbowKitCustomConnectButton } from "~~/components/scaffold-eth";
 import { useScaffoldWriteContract } from "~~/hooks/scaffold-eth/useScaffoldWriteContract";
+import { useScaffoldReadContract } from "~~/hooks/scaffold-eth/useScaffoldReadContract";
 import MapView from "~~/components/map/MapView";
 import type { Parcel } from "~~/types/parcel";
 import { toPng } from "html-to-image";
 import { notification } from "~~/utils/scaffold-eth";
+
+// Extend Window interface to include analyzeArea
+declare global {
+  interface Window {
+    analyzeArea?: () => Promise<void>;
+  }
+}
 
 interface BuildingDetails {
   id: string;
@@ -20,7 +28,33 @@ interface BuildingDetails {
 
 interface SelectedParcel {
   id: string;
-  buildingDetails: BuildingDetails;
+  buildingDetails: BuildingDetails | null;
+}
+
+interface ProposalMetadata {
+  name: string;
+  description: string;
+  type: string;
+  image: string;
+  image_url: string;
+  external_url: string;
+  attributes: Array<{
+    trait_type: string;
+    value: string;
+  }>;
+}
+
+interface ProposalData {
+  tokenId: number;
+  metadata: ProposalMetadata;
+  parcelIds: string[];
+}
+
+interface ProposalResponse {
+  parcelIds: readonly string[];
+  isConditional: boolean;
+  imageURI: string;
+  isActive: boolean;
 }
 
 export default function Home() {
@@ -31,6 +65,112 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState("my");
   const [cityTokenAmount, setCityTokenAmount] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingProposals, setIsLoadingProposals] = useState(false);
+
+  const { writeContractAsync: writeProposalNFT } = useScaffoldWriteContract({
+    contractName: "ProposalNFT",
+  });
+
+  // Check if contract is initialized by trying to read first proposal
+  const { data: firstProposal } = useScaffoldReadContract({
+    contractName: "ProposalNFT",
+    functionName: "getProposal",
+    args: [BigInt(0)],
+  });
+
+  const loadAllProposals = async () => {
+    if (!firstProposal) {
+      notification.error("Contract not initialized");
+      return;
+    }
+
+    setIsLoadingProposals(true);
+    try {
+      // Get all proposals by iterating through token IDs
+      let tokenId = BigInt(0);
+      const proposals: ProposalData[] = [];
+
+      while (true) {
+        try {
+          // Try to get proposal data
+          const { data: proposal } = await useScaffoldReadContract({
+            contractName: "ProposalNFT",
+            functionName: "getProposal",
+            args: [tokenId],
+          });
+
+          if (!proposal || !proposal.isActive) {
+            tokenId = tokenId + BigInt(1);
+            continue;
+          }
+
+          // Get token URI
+          const { data: uri } = await useScaffoldReadContract({
+            contractName: "ProposalNFT",
+            functionName: "tokenURI",
+            args: [tokenId],
+          });
+
+          if (!uri) {
+            tokenId = tokenId + BigInt(1);
+            continue;
+          }
+
+          // Remove ipfs:// prefix if present
+          const cleanUri = uri.replace("ipfs://", "");
+
+          // Fetch metadata from IPFS via Pinata gateway
+          const metadataResponse = await fetch(`https://gateway.pinata.cloud/ipfs/${cleanUri}`);
+          if (!metadataResponse.ok) {
+            tokenId = tokenId + BigInt(1);
+            continue;
+          }
+
+          const metadata = await metadataResponse.json();
+
+          proposals.push({
+            tokenId: Number(tokenId),
+            metadata,
+            parcelIds: [...proposal.parcelIds] // Spread operator to create new mutable array
+          });
+
+          tokenId = tokenId + BigInt(1);
+        } catch (error) {
+          // If we get an error, we've likely reached the end of valid tokens
+          break;
+        }
+      }
+
+      // Get unique parcel IDs from all valid proposals
+      const uniqueParcelIds = new Set(
+        proposals.flatMap(proposal => proposal.parcelIds)
+      );
+
+      // Update selected parcels with proper typing
+      const newSelectedParcels: SelectedParcel[] = Array.from(uniqueParcelIds).map(parcelId => ({
+        id: parcelId.toString(),
+        buildingDetails: null
+      }));
+
+      notification.success(`Loaded ${proposals.length} proposals with ${uniqueParcelIds.size} unique parcels`);
+
+      // Trigger area analysis to get building details for the parcels
+      setSelectedParcels(newSelectedParcels);
+      setActiveTab("selected");
+
+      // Analyze area to get building details
+      if (window.analyzeArea) {
+        setIsAnalyzing(true);
+        await window.analyzeArea();
+      }
+
+    } catch (error) {
+      console.error("Error loading proposals:", error);
+      notification.error(error instanceof Error ? error.message : "Failed to load proposals");
+    } finally {
+      setIsLoadingProposals(false);
+    }
+  };
 
   const handleParcelSelect = (parcelId: string | null, buildingDetails: BuildingDetails | null) => {
     if (!parcelId) return;
@@ -55,7 +195,9 @@ export default function Home() {
     const { address } = useAccount();
     const [proposalName, setProposalName] = useState("");
     const [proposalDescription, setProposalDescription] = useState("");
+    const [proposalType, setProposalType] = useState("Road");
     const [isConditional, setIsConditional] = useState(false);
+    const [shareUpside, setShareUpside] = useState(false);
     const [ethAmount, setEthAmount] = useState("");
     const [cityTokenAmount, setCityTokenAmount] = useState("");
     const [isLoading, setIsLoading] = useState(false);
@@ -118,12 +260,34 @@ export default function Home() {
         }
 
         const imageResult = await imageUploadResponse.json();
+        const imageUrl = `https://gateway.pinata.cloud/ipfs/${imageResult.IpfsHash}`;
 
         // Create and upload metadata
         const metadata = {
           name: proposalName,
           description: proposalDescription,
-          image: `https://gateway.pinata.cloud/ipfs/${imageResult.IpfsHash}` // Use Pinata gateway URL
+          type: proposalType,
+          image: imageUrl,
+          image_url: imageUrl, // Adding image_url as some marketplaces use this
+          external_url: imageUrl,
+          attributes: [
+            {
+              trait_type: "Proposal Type",
+              value: proposalType
+            },
+            {
+              trait_type: "Conditional",
+              value: isConditional ? "Yes" : "No"
+            },
+            {
+              trait_type: "Share Upside",
+              value: shareUpside ? "Yes" : "No"
+            },
+            {
+              trait_type: "Parcels",
+              value: selectedParcels.length.toString()
+            }
+          ]
         };
 
         // Upload metadata to Pinata
@@ -224,6 +388,22 @@ export default function Home() {
             )}
             <div className="form-control">
               <label className="label">
+                <span className="label-text">Proposal Type</span>
+              </label>
+              <select
+                className="select select-bordered w-full rounded-lg"
+                value={proposalType}
+                onChange={(e) => setProposalType(e.target.value)}
+              >
+                <option value="Road">Road</option>
+                <option value="Park">Park</option>
+                <option value="Square">Square</option>
+                <option value="Buildings">Buildings</option>
+                <option value="Mixed">Mixed</option>
+              </select>
+            </div>
+            <div className="form-control">
+              <label className="label">
                 <span className="label-text">Proposal Name</span>
               </label>
               <input
@@ -256,18 +436,32 @@ export default function Home() {
               </div>
             </div>
             <div className="form-control">
-              <label className="label cursor-pointer justify-start gap-2">
-                <input
-                  type="checkbox"
-                  className="checkbox rounded-md"
-                  checked={isConditional}
-                  onChange={(e) => setIsConditional(e.target.checked)}
-                />
-                <span className="label-text">Conditional</span>
-                <div className="tooltip" data-tip="If checked, the proposal executes only if all parcels accept it. Otherwise each accepting parcel gets a proportional share of the attached crypto">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="w-4 h-4 stroke-current"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                </div>
-              </label>
+              <div className="flex items-center gap-6">
+                <label className="label cursor-pointer justify-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="checkbox rounded-md"
+                    checked={isConditional}
+                    onChange={(e) => setIsConditional(e.target.checked)}
+                  />
+                  <span className="label-text">Conditional</span>
+                  <div className="tooltip" data-tip="If checked, the proposal executes only if all parcels accept it. Otherwise each accepting parcel gets a proportional share of the attached crypto">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="w-4 h-4 stroke-current"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                  </div>
+                </label>
+                <label className="label cursor-pointer justify-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="checkbox rounded-md"
+                    checked={shareUpside}
+                    onChange={(e) => setShareUpside(e.target.checked)}
+                  />
+                  <span className="label-text">Share of the upside</span>
+                  <div className="tooltip" data-tip="If you check this box, the parcels form a meta-parcel for sale, which when sold appropriates an amount to each parcel proportional to its share of the area involved">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="w-4 h-4 stroke-current"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                  </div>
+                </label>
+              </div>
             </div>
             <div className="form-control">
               <label className="label">
@@ -330,7 +524,7 @@ export default function Home() {
     );
   };
 
-  // Update ControlsPanel to handle modal
+  // Update ControlsPanel to use firstProposal for button disable state
   const ControlsPanel = () => {
     return (
       <div className="p-4">
@@ -357,12 +551,94 @@ export default function Home() {
               Create Proposal
             </button>
           </div>
+          <div>
+            <button
+              className={`btn btn-accent w-full ${isLoadingProposals ? 'loading' : ''}`}
+              onClick={loadAllProposals}
+              disabled={isLoadingProposals || !firstProposal}
+            >
+              {isLoadingProposals ? 'Loading Proposals...' : 'Load All Proposals'}
+            </button>
+          </div>
+          <div>
+            <button
+              className="btn w-full bg-gradient-to-r from-pink-500 to-purple-500 text-white hover:from-pink-600 hover:to-purple-600"
+              onClick={() => {
+                // TODO: Implement meme token status check
+                console.log("Checking meme token status...");
+              }}
+            >
+              Meme Token Status
+            </button>
+          </div>
         </div>
       </div>
     );
   };
 
-  // Placeholder for list component
+  // Add this helper function near the top of the file, after the interfaces
+  const calculateDimensions = (geometry: Array<{ lat: number; lon: number }>) => {
+    const lats = geometry.map(p => p.lat);
+    const lons = geometry.map(p => p.lon);
+
+    // Calculate height and width in meters (approximate)
+    const latDiff = Math.max(...lats) - Math.min(...lats);
+    const lonDiff = Math.max(...lons) - Math.min(...lons);
+
+    // Convert to meters (rough approximation)
+    const metersPerLat = 111320; // meters per degree of latitude
+    const metersPerLon = 111320 * Math.cos(geometry[0].lat * Math.PI / 180); // meters per degree of longitude at this latitude
+
+    return {
+      width: (lonDiff * metersPerLon).toFixed(1),
+      height: (latDiff * metersPerLat).toFixed(1)
+    };
+  };
+
+  // Update BuildingDetailsTooltip to handle null buildingDetails
+  const BuildingDetailsTooltip = ({ buildingDetails }: { buildingDetails: BuildingDetails | null }) => {
+    if (!buildingDetails) {
+      return <div className="p-3">Loading building details...</div>;
+    }
+
+    const { width, height } = calculateDimensions(buildingDetails.geometry);
+
+    return (
+      <div className="max-w-sm space-y-2 p-3 text-base-content">
+        <div>
+          <span className="font-semibold text-primary">Building ID:</span> {buildingDetails.id}
+        </div>
+        <div>
+          <span className="font-semibold text-primary">Area:</span> {(buildingDetails.area * 1000000).toFixed(1)} m²
+        </div>
+        <div>
+          <span className="font-semibold text-primary">Location:</span> {buildingDetails.center.lat.toFixed(6)}, {buildingDetails.center.lon.toFixed(6)}
+        </div>
+        <div>
+          <span className="font-semibold text-primary">Dimensions:</span>
+          <div className="pl-3 space-y-1">
+            <div>Width: ~{width} m</div>
+            <div>Height: ~{height} m</div>
+            <div>Vertices: {buildingDetails.geometry.length}</div>
+          </div>
+        </div>
+        {Object.entries(buildingDetails.tags).length > 0 && (
+          <div>
+            <span className="font-semibold text-primary">Building Tags:</span>
+            <div className="pl-3 space-y-1">
+              {Object.entries(buildingDetails.tags).map(([key, value]) => (
+                <div key={key}>
+                  <span className="font-medium">{key}:</span> {value}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Update the ListPanel's parcel rendering
   const ListPanel = ({ onParcelSelect }: { onParcelSelect?: (parcelId: string | null, buildingDetails: BuildingDetails | null) => void }) => {
     return (
       <div className="p-4">
@@ -398,8 +674,15 @@ export default function Home() {
                       ✕
                     </button>
                     <h3 className="text-xl font-semibold mb-2">Parcel</h3>
-                    <p>ID: {parcel.id}</p>
-                    <p className="text-sm text-base-content/70">Building: {parcel.buildingDetails.tags.building || 'Unknown'}</p>
+                    <div className="group relative inline-block">
+                      <div className="text-sm hover:text-primary cursor-help">
+                        {parcel.id}
+                        <div className="opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-200 absolute left-0 top-full mt-1 z-[99999] bg-[#e6d5b8] rounded-lg shadow-xl border border-[#d4bc94] w-[25vw] text-black transform -translate-x-1/4">
+                          <BuildingDetailsTooltip buildingDetails={parcel.buildingDetails} />
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-sm text-base-content/70">Building: {parcel.buildingDetails?.tags.building || 'Unknown'}</p>
                   </div>
                 ))
               ) : (
@@ -416,8 +699,17 @@ export default function Home() {
     );
   };
 
-  // Placeholder for details component
+  // Update DetailsPanel to handle null buildingDetails
   const DetailsPanel = ({ selectedBuilding }: { selectedBuilding: BuildingDetails | null }) => {
+    if (!selectedBuilding) {
+      return (
+        <div className="p-4">
+          <h2 className="text-2xl font-bold mb-4">Details</h2>
+          <p>No building selected</p>
+        </div>
+      );
+    }
+
     const calculateDimensions = (geometry: Array<{ lat: number; lon: number }>) => {
       const lats = geometry.map(p => p.lat);
       const lons = geometry.map(p => p.lon);
@@ -439,71 +731,67 @@ export default function Home() {
     return (
       <div className="p-4">
         <h2 className="text-2xl font-bold mb-4">Details</h2>
-        {selectedBuilding ? (
-          <div className="space-y-2">
-            <div className="bg-base-200 p-4 rounded-lg">
-              <h3 className="text-xl font-semibold mb-2">Building Information</h3>
-              <p>ID: {selectedBuilding.id}</p>
-              <p>Area: {(selectedBuilding.area * 1000000).toFixed(1)} m²</p>
-              <p>Location: {selectedBuilding.center.lat.toFixed(6)}, {selectedBuilding.center.lon.toFixed(6)}</p>
-              {selectedBuilding.geometry && (
-                <div className="mt-2">
-                  <p className="font-semibold">Dimensions</p>
-                  <div className="space-y-1">
-                    {(() => {
-                      const { width, height } = calculateDimensions(selectedBuilding.geometry);
-                      return (
-                        <>
-                          <p>Width: ~{width} m</p>
-                          <p>Height: ~{height} m</p>
-                          <p>Vertices: {selectedBuilding.geometry.length}</p>
-                        </>
-                      );
-                    })()}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {selectedBuilding.parcelId ? (
-              <div className="bg-base-200 p-4 rounded-lg">
-                <h3 className="text-xl font-semibold mb-2">Land Parcel</h3>
-                <p>Parcel ID: {selectedBuilding.parcelId}</p>
-                <p className="text-sm text-base-content/70">This building is part of the highlighted land parcel</p>
-              </div>
-            ) : (
-              <div className="bg-warning/20 p-4 rounded-lg">
-                <h3 className="text-xl font-semibold mb-2">Land Parcel</h3>
-                <p className="text-warning-content">No land parcel information available for this building</p>
-              </div>
-            )}
-
-            {Object.entries(selectedBuilding.tags).length > 0 && (
-              <div className="bg-base-200 p-4 rounded-lg">
-                <h3 className="text-xl font-semibold mb-2">Building Tags</h3>
+        <div className="space-y-2">
+          <div className="bg-base-200 p-4 rounded-lg">
+            <h3 className="text-xl font-semibold mb-2">Building Information</h3>
+            <p>ID: {selectedBuilding.id}</p>
+            <p>Area: {(selectedBuilding.area * 1000000).toFixed(1)} m²</p>
+            <p>Location: {selectedBuilding.center.lat.toFixed(6)}, {selectedBuilding.center.lon.toFixed(6)}</p>
+            {selectedBuilding.geometry && (
+              <div className="mt-2">
+                <p className="font-semibold">Dimensions</p>
                 <div className="space-y-1">
-                  {Object.entries(selectedBuilding.tags).map(([key, value]) => (
-                    <p key={key} className="text-sm">
-                      <span className="font-semibold">{key}:</span> {value}
-                    </p>
-                  ))}
+                  {(() => {
+                    const { width, height } = calculateDimensions(selectedBuilding.geometry);
+                    return (
+                      <>
+                        <p>Width: ~{width} m</p>
+                        <p>Height: ~{height} m</p>
+                        <p>Vertices: {selectedBuilding.geometry.length}</p>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             )}
-
-            <div className="bg-base-200 p-4 rounded-lg">
-              <h3 className="text-xl font-semibold mb-2">Offers</h3>
-              <p>No offers yet</p>
-            </div>
-
-            <div className="bg-base-200 p-4 rounded-lg">
-              <h3 className="text-xl font-semibold mb-2">Proposals</h3>
-              <p>No proposals yet</p>
-            </div>
           </div>
-        ) : (
-          <p>No building selected</p>
-        )}
+
+          {selectedBuilding.parcelId ? (
+            <div className="bg-base-200 p-4 rounded-lg">
+              <h3 className="text-xl font-semibold mb-2">Land Parcel</h3>
+              <p>Parcel ID: {selectedBuilding.parcelId}</p>
+              <p className="text-sm text-base-content/70">This building is part of the highlighted land parcel</p>
+            </div>
+          ) : (
+            <div className="bg-warning/20 p-4 rounded-lg">
+              <h3 className="text-xl font-semibold mb-2">Land Parcel</h3>
+              <p className="text-warning-content">No land parcel information available for this building</p>
+            </div>
+          )}
+
+          {Object.entries(selectedBuilding.tags).length > 0 && (
+            <div className="bg-base-200 p-4 rounded-lg">
+              <h3 className="text-xl font-semibold mb-2">Building Tags</h3>
+              <div className="space-y-1">
+                {Object.entries(selectedBuilding.tags).map(([key, value]) => (
+                  <p key={key} className="text-sm">
+                    <span className="font-semibold">{key}:</span> {value}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="bg-base-200 p-4 rounded-lg">
+            <h3 className="text-xl font-semibold mb-2">Offers</h3>
+            <p>No offers yet</p>
+          </div>
+
+          <div className="bg-base-200 p-4 rounded-lg">
+            <h3 className="text-xl font-semibold mb-2">Proposals</h3>
+            <p>No proposals yet</p>
+          </div>
+        </div>
       </div>
     );
   };

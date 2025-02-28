@@ -117,11 +117,11 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze, selectedParcelId
         Object.entries(parcelLayersRef.current).forEach(([parcelId, polygon]) => {
             const isSelected = selectedParcelIds.includes(parcelId);
             polygon.setStyle({
-                fillColor: isSelected ? '#ff3388' : '#000000',
-                color: isSelected ? '#ff3388' : '#000000',
+                fillColor: isSelected ? '#FFD700' : '#000000',
+                color: isSelected ? '#FFD700' : '#000000',
                 weight: 1,
                 opacity: 0.5,
-                fillOpacity: 0.1
+                fillOpacity: 0.3
             });
         });
     }, [selectedParcelIds]);
@@ -479,11 +479,11 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze, selectedParcelId
                                 const coordinates: LatLngExpression[] = parcel.geometry.map((point: Point) => [point.lat, point.lon]);
                                 const isSelected = selectedParcelIds.includes(parcel.id);
                                 const polygon = L.polygon(coordinates, {
-                                    fillColor: isSelected ? '#ff3388' : '#000000',
-                                    color: isSelected ? '#ff3388' : '#000000',
+                                    fillColor: isSelected ? '#FFD700' : '#000000',
+                                    color: isSelected ? '#FFD700' : '#000000',
                                     weight: 1,
                                     opacity: 0.5,
-                                    fillOpacity: 0.1
+                                    fillOpacity: 0.3
                                 }).addTo(map);
 
                                 // Add click handler for parcels
@@ -498,7 +498,7 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze, selectedParcelId
                                             onParcelSelect?.(parcel.id, null);
                                         } else {
                                             // Select the parcel
-                                            polygon.setStyle({ fillColor: '#ff3388', color: '#ff3388' });
+                                            polygon.setStyle({ fillColor: '#FFD700', color: '#FFD700' });
                                             const details: BuildingDetails = {
                                                 id: buildingDetails.id.toString(),
                                                 area: parcel.area,
@@ -550,7 +550,7 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze, selectedParcelId
                                             selectedMarkerRef.current.marker.setStyle({ fillColor: '#3388ff', color: '#3388ff' });
                                         }
                                         // Select new polygon
-                                        polygon.setStyle({ fillColor: '#ff3388', color: '#ff3388' });
+                                        polygon.setStyle({ fillColor: '#FFD700', color: '#FFD700' });
 
                                         const buildingDetails: BuildingDetails = {
                                             id: buildingId,

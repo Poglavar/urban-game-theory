@@ -1,0 +1,10 @@
+Features by priority:
+
+- fix My parcels tab to show NFTs owned by the user (both parcels and proposals) when he is connected with his wallet
+- make it so each parcel is minted as an NFT upon "Load Parcel Data" being clicked, but only if it doesn't already exist. When they are minted, they should be placed randomly in the wallets of the users. The users's wallets should be the ones we have generated from the seed phrase.
+- Create a "Proposals and Offers" panel, which shows all the proposals and offers for the selected parcels
+- Once Load Parcel Data is clicked, and after generating parcels and displaying them is completed, parse all parcels and silently mint NFTs in the background for those that do not have an NFT attached. Set the owner a random address out of five addresses provided in .env
+
+
+
+https://ipfs.io/ipfs/QmUQw24iZPaJmijwyesv7D8AC46gifymTdqJ9eiepEpqw2
