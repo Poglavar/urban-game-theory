@@ -31,3 +31,8 @@ p {
 .btn.btn-ghost {
   @apply shadow-none;
 }
+
+/* Leaflet Attribution Control z-index */
+.leaflet-control-attribution {
+  z-index: 500 !important;
+}

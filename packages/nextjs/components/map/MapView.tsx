@@ -68,6 +68,7 @@ interface ParcelDetails {
 interface MapViewProps {
     onParcelSelect?: (parcelId: string | null, buildingDetails: BuildingDetails | null) => void;
     onAnalyze?: () => void;
+    selectedParcelIds?: string[];
 }
 
 // Dynamic imports
@@ -82,7 +83,7 @@ const Map = dynamic(
 );
 
 // Create a client-side only version of the map component
-const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze }) => {
+const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze, selectedParcelIds = [] }) => {
     const mapRef = useRef<LeafletMap | null>(null);
     const mapContainerRef = useRef<HTMLDivElement>(null);
     const hasInitializedRef = useRef(false);
@@ -100,8 +101,10 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze }) => {
                 xj = polygon[j].lon,
                 yj = polygon[j].lat;
 
-            const intersect = ((yi > point.lat) !== (yj > point.lat)) &&
-                (point.lon < (xj - xi) * (point.lat - yi) / (yj - yi) + xi);
+            const intersect = (
+                ((yi > point.lat) !== (yj > point.lat)) &&
+                (point.lon < ((xj - xi) * (point.lat - yi) / (yj - yi) + xi))
+            );
             if (intersect) {
                 inside = !inside;
             }
@@ -133,8 +136,17 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze }) => {
 
                 mapRef.current = map;
 
-                // Make the map instance available globally for the analyze function
+                // Add a handler for parcel deselection
+                const handleParcelDeselect = (parcelId: string) => {
+                    const layer = parcelLayersRef.current[parcelId];
+                    if (layer) {
+                        layer.setStyle({ fillColor: '#000000', color: '#000000' });
+                    }
+                };
+
+                // Make the map instance and deselect handler available globally
                 (window as any).map = map;
+                (window as any).handleParcelDeselect = handleParcelDeselect;
                 (window as any).analyzeArea = async () => {
                     try {
                         setError(null);
@@ -286,7 +298,6 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze }) => {
                                     Object.values(parcelLayersRef.current).forEach(layer => layer.remove());
                                     parcelLayersRef.current = {};
                                     parcelLayersRef.current['road'] = roadLayer;
-                                    parcelLayersRef.current.push(roadLayer);
                                 });
                             } catch (error) {
                                 console.warn('Error drawing roads:', error);
@@ -452,9 +463,10 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze }) => {
                             // Draw parcels
                             parcels.forEach((parcel: GeneratedParcel) => {
                                 const coordinates: LatLngExpression[] = parcel.geometry.map((point: Point) => [point.lat, point.lon]);
+                                const isSelected = selectedParcelIds.includes(parcel.id);
                                 const polygon = L.polygon(coordinates, {
-                                    fillColor: '#000000',
-                                    color: '#000000',
+                                    fillColor: isSelected ? '#ff3388' : '#000000',
+                                    color: isSelected ? '#ff3388' : '#000000',
                                     weight: 1,
                                     opacity: 0.5,
                                     fillOpacity: 0.1
@@ -464,9 +476,9 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze }) => {
                                 polygon.on('click', () => {
                                     const buildingDetails = buildings.find(b => b.id.toString() === parcel.buildingId);
                                     if (buildingDetails) {
-                                        const isSelected = polygon.options.fillColor === '#ff3388';
+                                        const isCurrentlySelected = selectedParcelIds.includes(parcel.id);
 
-                                        if (isSelected) {
+                                        if (isCurrentlySelected) {
                                             // Deselect the parcel
                                             polygon.setStyle({ fillColor: '#000000', color: '#000000' });
                                             onParcelSelect?.(parcel.id, null);
@@ -581,7 +593,7 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze }) => {
                 hasInitializedRef.current = false;
             }
         };
-    }, [onAnalyze, onParcelSelect]);
+    }, [onAnalyze, onParcelSelect, selectedParcelIds]);
 
     return (
         <div className="relative w-full h-full">
