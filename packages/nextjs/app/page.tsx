@@ -5,10 +5,12 @@ import { useAccount } from "wagmi";
 import { RainbowKitCustomConnectButton } from "~~/components/scaffold-eth";
 import { useScaffoldWriteContract } from "~~/hooks/scaffold-eth/useScaffoldWriteContract";
 import { useScaffoldReadContract } from "~~/hooks/scaffold-eth/useScaffoldReadContract";
+import { useScaffoldContract } from "~~/hooks/scaffold-eth/useScaffoldContract";
 import MapView from "~~/components/map/MapView";
 import type { Parcel } from "~~/types/parcel";
 import { toPng } from "html-to-image";
 import { notification } from "~~/utils/scaffold-eth";
+import { Contract } from "ethers";
 
 // Extend Window interface to include analyzeArea
 declare global {
@@ -60,15 +62,32 @@ interface ProposalResponse {
 export default function Home() {
   const { address } = useAccount();
   const [selectedParcels, setSelectedParcels] = useState<SelectedParcel[]>([]);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isAnalyzingParcels, setIsAnalyzingParcels] = useState(false);
   const [showProposalModal, setShowProposalModal] = useState(false);
+  const [showMemeTokenModal, setShowMemeTokenModal] = useState(false);
   const [activeTab, setActiveTab] = useState("my");
   const [cityTokenAmount, setCityTokenAmount] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingProposals, setIsLoadingProposals] = useState(false);
+  const [memeTokenData, setMemeTokenData] = useState<any>(null);
+  const [isLoadingMemeData, setIsLoadingMemeData] = useState(false);
 
   const { writeContractAsync: writeProposalNFT } = useScaffoldWriteContract({
     contractName: "ProposalNFT",
+  });
+
+  const { data: memeTokenContract } = useScaffoldContract({
+    contractName: "CityMemeToken",
+  }) as { data: Contract | null };
+
+  const { data: totalSupply } = useScaffoldReadContract({
+    contractName: "CityMemeToken",
+    functionName: "totalSupply",
+  });
+
+  const { data: owner } = useScaffoldReadContract({
+    contractName: "CityMemeToken",
+    functionName: "owner",
   });
 
   // Check if contract is initialized by trying to read first proposal
@@ -154,15 +173,9 @@ export default function Home() {
 
       notification.success(`Loaded ${proposals.length} proposals with ${uniqueParcelIds.size} unique parcels`);
 
-      // Trigger area analysis to get building details for the parcels
+      // Update selected parcels without triggering analysis
       setSelectedParcels(newSelectedParcels);
       setActiveTab("selected");
-
-      // Analyze area to get building details
-      if (window.analyzeArea) {
-        setIsAnalyzing(true);
-        await window.analyzeArea();
-      }
 
     } catch (error) {
       console.error("Error loading proposals:", error);
@@ -524,6 +537,103 @@ export default function Home() {
     );
   };
 
+  // Add this after ProposalModal component
+  const MemeTokenModal = ({ showMemeTokenModal, setShowMemeTokenModal, memeTokenContract, totalSupply, owner }: {
+    showMemeTokenModal: boolean;
+    setShowMemeTokenModal: (show: boolean) => void;
+    memeTokenContract: Contract | null;
+    totalSupply: bigint | undefined;
+    owner: string | undefined;
+  }) => {
+    return (
+      <dialog id="meme_token_modal" className={`modal modal-bottom sm:modal-top ${showMemeTokenModal ? 'modal-open' : ''}`} style={{ zIndex: 1000 }}>
+        <div className="modal-box relative z-[1000] mt-8 mx-auto !w-[66vw] !max-w-[66vw] !rounded-[1rem] bg-gradient-to-br from-indigo-900 via-blue-900 to-purple-900 text-white" style={{ borderRadius: '1rem' }}>
+          <h3 className="font-bold text-lg mb-4">City Meme Token Status</h3>
+          <div className="space-y-4">
+            <div className="bg-white/10 backdrop-blur-sm p-4 rounded-lg">
+              <h4 className="font-semibold mb-2">Market Information</h4>
+              <div className="space-y-2">
+                <p><span className="font-medium">Current Market Value:</span> $0.008</p>
+                <p><span className="font-medium">Current Market Cap:</span> ${((totalSupply ?
+                  Number(totalSupply) / 10 ** 18 : 0) * 0.008).toLocaleString()}</p>
+                <p>
+                  <span className="font-medium">Coingecko:</span>{' '}
+                  <a
+                    href="https://www.coingecko.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="link text-blue-300 hover:text-blue-200"
+                  >
+                    View on Coingecko
+                  </a>
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white/10 backdrop-blur-sm p-4 rounded-lg">
+              <h4 className="font-semibold mb-2">Token Information</h4>
+              <div className="space-y-2">
+                <p><span className="font-medium">Name:</span> Zagreb Meme Token</p>
+                <p><span className="font-medium">Symbol:</span> ZAGREB</p>
+                <p><span className="font-medium">Deployment Date:</span> March 1, 2025</p>
+                <p>
+                  <span className="font-medium">Contract Address:</span>{' '}
+                  <a
+                    href={`https://sepolia.etherscan.io/address/${memeTokenContract?.target}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="link text-blue-300 hover:text-blue-200"
+                  >
+                    {memeTokenContract?.target}
+                  </a>
+                </p>
+                <p>
+                  <span className="font-medium">Contract Creator:</span>{' '}
+                  <a
+                    href={`https://sepolia.etherscan.io/address/${owner}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="link text-blue-300 hover:text-blue-200"
+                  >
+                    {owner}
+                  </a>
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white/10 backdrop-blur-sm p-4 rounded-lg">
+              <h4 className="font-semibold mb-2">Supply Information</h4>
+              <div className="space-y-2">
+                <p><span className="font-medium">Initial Supply:</span> 1,000,000,000 ZAGREB</p>
+                <p><span className="font-medium">Current Supply:</span> {totalSupply ?
+                  Number(totalSupply) / 10 ** 18 : 'Loading...'} ZAGREB</p>
+              </div>
+            </div>
+
+            <div className="bg-white/10 backdrop-blur-sm p-4 rounded-lg">
+              <h4 className="font-semibold mb-2">Top Holders</h4>
+              <div className="space-y-2">
+                <p className="text-white/70">Loading top holders data...</p>
+              </div>
+            </div>
+
+            <div className="modal-action">
+              <button
+                className="btn bg-white/20 hover:bg-white/30 text-white border-0"
+                onClick={() => setShowMemeTokenModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+        <form method="dialog" className="modal-backdrop bg-neutral-900/50" onClick={() => setShowMemeTokenModal(false)}>
+          <button className="cursor-default">close</button>
+        </form>
+      </dialog>
+    );
+  };
+
   // Update ControlsPanel to use firstProposal for button disable state
   const ControlsPanel = () => {
     return (
@@ -532,14 +642,14 @@ export default function Home() {
         <div className="space-y-4">
           <div>
             <button
-              className={`btn btn-primary w-full ${isAnalyzing ? 'loading' : ''}`}
+              className={`btn btn-primary w-full ${isAnalyzingParcels ? 'loading' : ''}`}
               onClick={() => {
-                setIsAnalyzing(true);
+                setIsAnalyzingParcels(true);
                 (window as any).analyzeArea?.();
               }}
-              disabled={isAnalyzing}
+              disabled={isAnalyzingParcels}
             >
-              {isAnalyzing ? 'Loading...' : 'Load Parcel Data'}
+              {isAnalyzingParcels ? 'Loading...' : 'Load Parcel Data'}
             </button>
           </div>
           <div>
@@ -553,20 +663,25 @@ export default function Home() {
           </div>
           <div>
             <button
-              className={`btn btn-accent w-full ${isLoadingProposals ? 'loading' : ''}`}
+              className={`btn btn-accent w-full flex items-center justify-center gap-2`}
               onClick={loadAllProposals}
               disabled={isLoadingProposals || !firstProposal}
             >
-              {isLoadingProposals ? 'Loading Proposals...' : 'Load All Proposals'}
+              {isLoadingProposals ? (
+                <>
+                  <span className="inline-block animate-bounce">⬇</span>
+                  <span>Loading Proposals</span>
+                  <span className="inline-block animate-bounce" style={{ animationDelay: '0.2s' }}>⬇</span>
+                </>
+              ) : (
+                'Load All Proposals'
+              )}
             </button>
           </div>
           <div>
             <button
               className="btn w-full bg-gradient-to-r from-pink-500 to-purple-500 text-white hover:from-pink-600 hover:to-purple-600"
-              onClick={() => {
-                // TODO: Implement meme token status check
-                console.log("Checking meme token status...");
-              }}
+              onClick={() => setShowMemeTokenModal(true)}
             >
               Meme Token Status
             </button>
@@ -699,98 +814,107 @@ export default function Home() {
     );
   };
 
-  // Update DetailsPanel to handle null buildingDetails
-  const DetailsPanel = ({ selectedBuilding }: { selectedBuilding: BuildingDetails | null }) => {
-    if (!selectedBuilding) {
-      return (
-        <div className="p-4">
-          <h2 className="text-2xl font-bold mb-4">Details</h2>
-          <p>No building selected</p>
-        </div>
-      );
-    }
-
-    const calculateDimensions = (geometry: Array<{ lat: number; lon: number }>) => {
-      const lats = geometry.map(p => p.lat);
-      const lons = geometry.map(p => p.lon);
-
-      // Calculate height and width in meters (approximate)
-      const latDiff = Math.max(...lats) - Math.min(...lats);
-      const lonDiff = Math.max(...lons) - Math.min(...lons);
-
-      // Convert to meters (rough approximation)
-      const metersPerLat = 111320; // meters per degree of latitude
-      const metersPerLon = 111320 * Math.cos(geometry[0].lat * Math.PI / 180); // meters per degree of longitude at this latitude
-
-      return {
-        width: (lonDiff * metersPerLon).toFixed(1),
-        height: (latDiff * metersPerLat).toFixed(1)
-      };
-    };
-
+  // Replace DetailsPanel with ProposalsPanel
+  const ProposalsPanel = () => {
     return (
       <div className="p-4">
-        <h2 className="text-2xl font-bold mb-4">Details</h2>
-        <div className="space-y-2">
-          <div className="bg-base-200 p-4 rounded-lg">
-            <h3 className="text-xl font-semibold mb-2">Building Information</h3>
-            <p>ID: {selectedBuilding.id}</p>
-            <p>Area: {(selectedBuilding.area * 1000000).toFixed(1)} m²</p>
-            <p>Location: {selectedBuilding.center.lat.toFixed(6)}, {selectedBuilding.center.lon.toFixed(6)}</p>
-            {selectedBuilding.geometry && (
-              <div className="mt-2">
-                <p className="font-semibold">Dimensions</p>
-                <div className="space-y-1">
-                  {(() => {
-                    const { width, height } = calculateDimensions(selectedBuilding.geometry);
-                    return (
-                      <>
-                        <p>Width: ~{width} m</p>
-                        <p>Height: ~{height} m</p>
-                        <p>Vertices: {selectedBuilding.geometry.length}</p>
-                      </>
-                    );
-                  })()}
+        <h2 className="text-2xl font-bold mb-4">Proposals</h2>
+        <div className="space-y-4">
+          {firstProposal ? (
+            <div className="grid grid-cols-1 gap-4">
+              <div className="card bg-base-100 shadow-xl">
+                <div className="card-body">
+                  <div className="flex justify-between items-start">
+                    <h3 className="card-title text-lg">New Park Development</h3>
+                    <span className="badge badge-accent">Park</span>
+                  </div>
+                  <p className="text-sm text-base-content/70 mt-2">Create a new public park with recreational facilities</p>
+                  <div className="mt-4 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span>Parcels Involved:</span>
+                      <span className="font-medium">3</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>Status:</span>
+                      <span className="text-success">Active</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>Conditional:</span>
+                      <span>Yes</span>
+                    </div>
+                  </div>
+                  <div className="card-actions justify-end mt-4">
+                    <button className="btn btn-sm btn-primary">View Details</button>
+                  </div>
                 </div>
               </div>
-            )}
-          </div>
 
-          {selectedBuilding.parcelId ? (
-            <div className="bg-base-200 p-4 rounded-lg">
-              <h3 className="text-xl font-semibold mb-2">Land Parcel</h3>
-              <p>Parcel ID: {selectedBuilding.parcelId}</p>
-              <p className="text-sm text-base-content/70">This building is part of the highlighted land parcel</p>
-            </div>
-          ) : (
-            <div className="bg-warning/20 p-4 rounded-lg">
-              <h3 className="text-xl font-semibold mb-2">Land Parcel</h3>
-              <p className="text-warning-content">No land parcel information available for this building</p>
-            </div>
-          )}
+              <div className="card bg-base-100 shadow-xl">
+                <div className="card-body">
+                  <div className="flex justify-between items-start">
+                    <h3 className="card-title text-lg">Road Extension</h3>
+                    <span className="badge badge-secondary">Road</span>
+                  </div>
+                  <p className="text-sm text-base-content/70 mt-2">Extend the main road to improve connectivity</p>
+                  <div className="mt-4 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span>Parcels Involved:</span>
+                      <span className="font-medium">5</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>Status:</span>
+                      <span className="text-success">Active</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>Conditional:</span>
+                      <span>No</span>
+                    </div>
+                  </div>
+                  <div className="card-actions justify-end mt-4">
+                    <button className="btn btn-sm btn-primary">View Details</button>
+                  </div>
+                </div>
+              </div>
 
-          {Object.entries(selectedBuilding.tags).length > 0 && (
-            <div className="bg-base-200 p-4 rounded-lg">
-              <h3 className="text-xl font-semibold mb-2">Building Tags</h3>
-              <div className="space-y-1">
-                {Object.entries(selectedBuilding.tags).map(([key, value]) => (
-                  <p key={key} className="text-sm">
-                    <span className="font-semibold">{key}:</span> {value}
-                  </p>
-                ))}
+              <div className="card bg-base-100 shadow-xl">
+                <div className="card-body">
+                  <div className="flex justify-between items-start">
+                    <h3 className="card-title text-lg">Mixed-Use Development</h3>
+                    <span className="badge badge-warning">Mixed</span>
+                  </div>
+                  <p className="text-sm text-base-content/70 mt-2">Create a mixed-use area with retail and residential spaces</p>
+                  <div className="mt-4 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span>Parcels Involved:</span>
+                      <span className="font-medium">8</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>Status:</span>
+                      <span className="text-success">Active</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>Conditional:</span>
+                      <span>Yes</span>
+                    </div>
+                  </div>
+                  <div className="card-actions justify-end mt-4">
+                    <button className="btn btn-sm btn-primary">View Details</button>
+                  </div>
+                </div>
               </div>
             </div>
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-base-content/70">No proposals available yet</p>
+              <button
+                className="btn btn-primary mt-4"
+                onClick={() => setShowProposalModal(true)}
+                disabled={selectedParcels.length === 0}
+              >
+                Create First Proposal
+              </button>
+            </div>
           )}
-
-          <div className="bg-base-200 p-4 rounded-lg">
-            <h3 className="text-xl font-semibold mb-2">Offers</h3>
-            <p>No offers yet</p>
-          </div>
-
-          <div className="bg-base-200 p-4 rounded-lg">
-            <h3 className="text-xl font-semibold mb-2">Proposals</h3>
-            <p>No proposals yet</p>
-          </div>
         </div>
       </div>
     );
@@ -803,7 +927,7 @@ export default function Home() {
         <MapView
           onParcelSelect={handleParcelSelect}
           onAnalyze={() => {
-            setIsAnalyzing(false);
+            setIsAnalyzingParcels(false);
           }}
           selectedParcelIds={selectedParcels.map(p => p.id)}
         />
@@ -819,13 +943,20 @@ export default function Home() {
         <ListPanel onParcelSelect={handleParcelSelect} />
       </div>
 
-      {/* Lower Right - Details */}
+      {/* Lower Right - Proposals */}
       <div className="w-1/2 h-1/2 overflow-auto">
-        <DetailsPanel selectedBuilding={selectedParcels[selectedParcels.length - 1]?.buildingDetails || null} />
+        <ProposalsPanel />
       </div>
 
       {/* Proposal Modal */}
       <ProposalModal />
+      <MemeTokenModal
+        showMemeTokenModal={showMemeTokenModal}
+        setShowMemeTokenModal={setShowMemeTokenModal}
+        memeTokenContract={memeTokenContract}
+        totalSupply={totalSupply}
+        owner={owner}
+      />
     </div>
   );
 }
