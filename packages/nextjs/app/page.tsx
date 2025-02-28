@@ -235,7 +235,6 @@ export default function Home() {
                     <button
                       className="btn btn-ghost btn-xs absolute top-2 right-2"
                       onClick={() => {
-                        setSelectedParcels(prevParcels => prevParcels.filter(p => p.id !== parcel.id));
                         onParcelSelect?.(parcel.id, null);
                       }}
                     >

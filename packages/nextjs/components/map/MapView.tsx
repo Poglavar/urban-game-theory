@@ -113,6 +113,20 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze, selectedParcelId
     };
 
     useEffect(() => {
+        // Update polygon styles based on selectedParcelIds
+        Object.entries(parcelLayersRef.current).forEach(([parcelId, polygon]) => {
+            const isSelected = selectedParcelIds.includes(parcelId);
+            polygon.setStyle({
+                fillColor: isSelected ? '#ff3388' : '#000000',
+                color: isSelected ? '#ff3388' : '#000000',
+                weight: 1,
+                opacity: 0.5,
+                fillOpacity: 0.1
+            });
+        });
+    }, [selectedParcelIds]);
+
+    useEffect(() => {
         if (!mapContainerRef.current || hasInitializedRef.current || typeof window === 'undefined') return;
 
         hasInitializedRef.current = true;
@@ -496,7 +510,8 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze, selectedParcelId
                                                     { lat: 0, lon: 0 }
                                                 ),
                                                 tags: buildingDetails.tags || {},
-                                                geometry: buildingDetails.geometry
+                                                geometry: buildingDetails.geometry,
+                                                parcelId: parcel.id
                                             };
                                             onParcelSelect?.(parcel.id, details);
                                         }
