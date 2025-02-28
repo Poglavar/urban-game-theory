@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useAccount } from "wagmi";
 import { RainbowKitCustomConnectButton } from "~~/components/scaffold-eth";
+import { useScaffoldWriteContract } from "~~/hooks/scaffold-eth/useScaffoldWriteContract";
 import MapView from "~~/components/map/MapView";
 import type { Parcel } from "~~/types/parcel";
 
@@ -26,6 +27,8 @@ export default function Home() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showProposalModal, setShowProposalModal] = useState(false);
   const [activeTab, setActiveTab] = useState("my");
+  const [cityTokenAmount, setCityTokenAmount] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleParcelSelect = (parcelId: string | null, buildingDetails: BuildingDetails | null) => {
     if (!parcelId) return;
@@ -53,10 +56,32 @@ export default function Home() {
     const [isConditional, setIsConditional] = useState(false);
     const [ethAmount, setEthAmount] = useState("");
     const [cityTokenAmount, setCityTokenAmount] = useState("");
+    const [isLoading, setIsLoading] = useState(false);
+
+    const { writeContractAsync, isMining } = useScaffoldWriteContract({
+      contractName: "ProposalNFT",
+    });
+
+    const handleMint = async () => {
+      if (!address || selectedParcels.length === 0) return;
+
+      setIsLoading(true);
+      try {
+        await writeContractAsync({
+          functionName: "mint",
+          args: [address, selectedParcels.map(parcel => parcel.id), isConditional, ""],
+        });
+        setShowProposalModal(false);
+      } catch (error) {
+        console.error("Error minting proposal:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
     return (
       <dialog id="proposal_modal" className={`modal modal-bottom sm:modal-top ${showProposalModal ? 'modal-open' : ''}`} style={{ zIndex: 1000 }}>
-        <div className="modal-box relative z-[1000] mt-8 mx-auto !w-[33vw] !max-w-[33vw]">
+        <div className="modal-box relative z-[1000] mt-8 mx-auto !w-[33vw] !max-w-[33vw] !rounded-[1rem] bg-base-100 shadow-xl" style={{ borderRadius: '1rem' }}>
           <h3 className="font-bold text-lg mb-4">Create New Proposal</h3>
           <div className="space-y-4">
             <div className="form-control">
@@ -66,7 +91,7 @@ export default function Home() {
               <input
                 type="text"
                 placeholder="Enter proposal name"
-                className="input input-bordered w-full"
+                className="input input-bordered w-full rounded-lg"
                 value={proposalName}
                 onChange={(e) => setProposalName(e.target.value)}
               />
@@ -77,14 +102,14 @@ export default function Home() {
               </label>
               <textarea
                 placeholder="Enter proposal description"
-                className="textarea textarea-bordered w-full h-24"
+                className="textarea textarea-bordered w-full h-24 rounded-lg"
                 value={proposalDescription}
                 onChange={(e) => setProposalDescription(e.target.value)}
               />
             </div>
             <div>
               <h4 className="font-semibold mb-2">Selected Parcels:</h4>
-              <div className="bg-base-200 p-2 rounded">
+              <div className="bg-base-200 p-2 rounded-lg">
                 {selectedParcels.map(parcel => (
                   <div key={parcel.id} className="text-sm">
                     {parcel.id}
@@ -96,7 +121,7 @@ export default function Home() {
               <label className="label cursor-pointer justify-start gap-2">
                 <input
                   type="checkbox"
-                  className="checkbox"
+                  className="checkbox rounded-md"
                   checked={isConditional}
                   onChange={(e) => setIsConditional(e.target.checked)}
                 />
@@ -115,7 +140,7 @@ export default function Home() {
                 step="0.001"
                 min="0"
                 placeholder="Enter ETH amount"
-                className="input input-bordered w-full"
+                className="input input-bordered w-full rounded-lg"
                 value={ethAmount}
                 onChange={(e) => setEthAmount(e.target.value)}
               />
@@ -129,7 +154,7 @@ export default function Home() {
                 step="1"
                 min="0"
                 placeholder="Enter City Token amount"
-                className="input input-bordered w-full"
+                className="input input-bordered w-full rounded-lg"
                 value={cityTokenAmount}
                 onChange={(e) => setCityTokenAmount(e.target.value)}
               />
@@ -141,20 +166,11 @@ export default function Home() {
               {!address && <RainbowKitCustomConnectButton />}
               {address && (
                 <button
-                  className="btn btn-primary"
-                  onClick={() => {
-                    // Handle minting logic here
-                    console.log("Minting proposal:", {
-                      proposalName,
-                      proposalDescription,
-                      parcels: selectedParcels,
-                      isConditional,
-                      ethAmount,
-                      cityTokenAmount
-                    });
-                  }}
+                  className={`btn btn-primary ${isLoading || isMining ? 'loading' : ''}`}
+                  onClick={handleMint}
+                  disabled={isLoading || isMining || selectedParcels.length === 0}
                 >
-                  Mint and Fund
+                  {isLoading || isMining ? 'Minting...' : 'Mint and Fund'}
                 </button>
               )}
               <button
@@ -166,9 +182,9 @@ export default function Home() {
             </div>
           </div>
         </div>
-        <div className="modal-backdrop bg-neutral-900/50" style={{ zIndex: 999 }} onClick={() => setShowProposalModal(false)}>
-          <button>close</button>
-        </div>
+        <form method="dialog" className="modal-backdrop bg-neutral-900/50" onClick={() => setShowProposalModal(false)}>
+          <button className="cursor-default">close</button>
+        </form>
       </dialog>
     );
   };

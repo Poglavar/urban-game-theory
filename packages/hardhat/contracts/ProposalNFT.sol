@@ -21,12 +21,12 @@ contract ProposalNFT is ERC721, Ownable {
         parcelNFT = ParcelNFT(_parcelNFTAddress);
     }
 
-    function mint(
-        address to,
-        string[] memory parcelIds,
-        bool isConditional,
-        string memory imageURI
-    ) public onlyOwner returns (uint256) {
+    function mint(address to, string[] memory parcelIds, bool isConditional, string memory imageURI)
+        public
+        returns (uint256)
+    {
+        require(parcelIds.length > 0, "ProposalNFT: Must include at least one parcel");
+
         uint256 tokenId = _tokenIdCounter;
         _tokenIdCounter++;
 
