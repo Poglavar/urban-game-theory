@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAccount } from "wagmi";
 import { RainbowKitCustomConnectButton } from "~~/components/scaffold-eth";
 import { useScaffoldWriteContract } from "~~/hooks/scaffold-eth/useScaffoldWriteContract";
 import MapView from "~~/components/map/MapView";
 import type { Parcel } from "~~/types/parcel";
+import { toPng } from "html-to-image";
+import { notification } from "~~/utils/scaffold-eth";
 
 interface BuildingDetails {
   id: string;
@@ -57,23 +59,150 @@ export default function Home() {
     const [ethAmount, setEthAmount] = useState("");
     const [cityTokenAmount, setCityTokenAmount] = useState("");
     const [isLoading, setIsLoading] = useState(false);
+    const [imagePreviewUrl, setImagePreviewUrl] = useState<string>("");
+    const mapRef = useRef(null);
 
     const { writeContractAsync, isMining } = useScaffoldWriteContract({
       contractName: "ProposalNFT",
     });
 
+    const captureMapPreview = async () => {
+      try {
+        const mapElement = document.querySelector('.leaflet-container');
+        if (!mapElement) {
+          throw new Error('Map element not found');
+        }
+
+        const dataUrl = await toPng(mapElement as HTMLElement, {
+          quality: 0.95,
+          backgroundColor: 'white'
+        });
+
+        // Store the preview URL
+        setImagePreviewUrl(dataUrl);
+      } catch (error) {
+        console.error("Error capturing map preview:", error);
+        notification.error(error instanceof Error ? error.message : "Failed to capture map preview");
+      }
+    };
+
+    const uploadToIPFS = async () => {
+      try {
+        notification.info("Uploading to IPFS...");
+        const apiKey = process.env.NEXT_PUBLIC_PINATA_API_KEY;
+        const apiSecret = process.env.NEXT_PUBLIC_PINATA_API_SECRET;
+        if (!apiKey || !apiSecret) {
+          throw new Error('Pinata API key or secret not found. Please check your .env.local file');
+        }
+
+        // Convert data URL to Blob
+        const response = await fetch(imagePreviewUrl);
+        const blob = await response.blob();
+
+        // Create form data for the file
+        const formData = new FormData();
+        formData.append('file', blob, `${proposalName}-map-screenshot.png`);
+
+        // Upload image to Pinata
+        const imageUploadResponse = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+          method: 'POST',
+          headers: {
+            'pinata_api_key': apiKey,
+            'pinata_secret_api_key': apiSecret,
+          },
+          body: formData
+        });
+
+        if (!imageUploadResponse.ok) {
+          throw new Error('Failed to upload image to Pinata');
+        }
+
+        const imageResult = await imageUploadResponse.json();
+
+        // Create and upload metadata
+        const metadata = {
+          name: proposalName,
+          description: proposalDescription,
+          image: `https://gateway.pinata.cloud/ipfs/${imageResult.IpfsHash}` // Use Pinata gateway URL
+        };
+
+        // Upload metadata to Pinata
+        const metadataUploadResponse = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'pinata_api_key': apiKey,
+            'pinata_secret_api_key': apiSecret,
+          },
+          body: JSON.stringify({
+            pinataContent: metadata,
+            pinataMetadata: {
+              name: `${proposalName}-metadata.json`
+            }
+          })
+        });
+
+        if (!metadataUploadResponse.ok) {
+          throw new Error('Failed to upload metadata to Pinata');
+        }
+
+        const metadataResult = await metadataUploadResponse.json();
+        return `ipfs://${metadataResult.IpfsHash}`;
+      } catch (error) {
+        console.error("Error uploading to IPFS:", error);
+        notification.error(error instanceof Error ? error.message : "Failed to upload to IPFS");
+        throw error;
+      }
+    };
+
+    // Update useEffect to use the new preview function
+    useEffect(() => {
+      if (showProposalModal) {
+        captureMapPreview();
+      } else {
+        setImagePreviewUrl("");
+      }
+    }, [showProposalModal]);
+
     const handleMint = async () => {
-      if (!address || selectedParcels.length === 0) return;
+      if (!address || selectedParcels.length === 0) {
+        notification.error("Please connect wallet and select parcels");
+        return;
+      }
+
+      if (!proposalName || !proposalDescription) {
+        notification.error("Please fill in proposal name and description");
+        return;
+      }
+
+      if (!imagePreviewUrl) {
+        notification.error("Please wait for the map preview to load");
+        return;
+      }
 
       setIsLoading(true);
       try {
+        notification.info("Starting proposal creation...");
+        const ipfsUrl = await uploadToIPFS();
+
+        notification.info("Minting NFT...");
+        console.log("Minting with args:", {
+          address,
+          parcelIds: selectedParcels.map(parcel => parcel.id),
+          isConditional,
+          ipfsUrl
+        });
+
         await writeContractAsync({
           functionName: "mint",
-          args: [address, selectedParcels.map(parcel => parcel.id), isConditional, ""],
+          args: [address, selectedParcels.map(parcel => parcel.id), isConditional, ipfsUrl],
         });
+
+        notification.success("Proposal created successfully!");
         setShowProposalModal(false);
       } catch (error) {
         console.error("Error minting proposal:", error);
+        notification.error(error instanceof Error ? error.message : "Failed to create proposal");
       } finally {
         setIsLoading(false);
       }
@@ -84,6 +213,15 @@ export default function Home() {
         <div className="modal-box relative z-[1000] mt-8 mx-auto !w-[33vw] !max-w-[33vw] !rounded-[1rem] bg-base-100 shadow-xl" style={{ borderRadius: '1rem' }}>
           <h3 className="font-bold text-lg mb-4">Create New Proposal</h3>
           <div className="space-y-4">
+            {imagePreviewUrl && (
+              <div className="w-full aspect-video rounded-lg overflow-hidden border-2 border-base-300">
+                <img
+                  src={imagePreviewUrl}
+                  alt="Map Preview"
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            )}
             <div className="form-control">
               <label className="label">
                 <span className="label-text">Proposal Name</span>
@@ -167,7 +305,10 @@ export default function Home() {
               {address && (
                 <button
                   className={`btn btn-primary ${isLoading || isMining ? 'loading' : ''}`}
-                  onClick={handleMint}
+                  onClick={() => {
+                    console.log("Mint button clicked");
+                    handleMint();
+                  }}
                   disabled={isLoading || isMining || selectedParcels.length === 0}
                 >
                   {isLoading || isMining ? 'Minting...' : 'Mint and Fund'}

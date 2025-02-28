@@ -27,6 +27,7 @@
     "burner-connector": "0.0.9",
     "d3-delaunay": "^6.0.4",
     "daisyui": "4.12.10",
+    "html-to-image": "^1.11.13",
     "kubo-rpc-client": "^5.0.2",
     "leaflet": "^1.9.4",
     "next": "^14.2.11",
