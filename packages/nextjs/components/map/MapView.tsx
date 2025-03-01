@@ -69,6 +69,8 @@ interface MapViewProps {
     onParcelSelect?: (parcelId: string | null, buildingDetails: BuildingDetails | null) => void;
     onAnalyze?: () => void;
     selectedParcelIds?: string[];
+    highlightedParcelId?: string | null;
+    isAnalyzing?: boolean;
 }
 
 // Dynamic imports
@@ -83,7 +85,7 @@ const Map = dynamic(
 );
 
 // Create a client-side only version of the map component
-const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze, selectedParcelIds = [] }) => {
+const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze, selectedParcelIds = [], highlightedParcelId = null, isAnalyzing }) => {
     const mapRef = useRef<LeafletMap | null>(null);
     const mapContainerRef = useRef<HTMLDivElement>(null);
     const hasInitializedRef = useRef(false);
@@ -113,18 +115,19 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze, selectedParcelId
     };
 
     useEffect(() => {
-        // Update polygon styles based on selectedParcelIds
+        // Update polygon styles based on selectedParcelIds and highlightedParcelId
         Object.entries(parcelLayersRef.current).forEach(([parcelId, polygon]) => {
             const isSelected = selectedParcelIds.includes(parcelId);
+            const isHighlighted = highlightedParcelId === parcelId;
             polygon.setStyle({
-                fillColor: isSelected ? '#FFD700' : '#000000',
-                color: isSelected ? '#FFD700' : '#000000',
-                weight: 1,
-                opacity: 0.5,
-                fillOpacity: 0.3
+                fillColor: isHighlighted ? '#FF4500' : isSelected ? '#FFD700' : '#000000',
+                color: isHighlighted ? '#FF4500' : isSelected ? '#FFD700' : '#000000',
+                weight: isHighlighted ? 2 : 1,
+                opacity: isHighlighted ? 0.8 : 0.5,
+                fillOpacity: isHighlighted ? 0.5 : 0.3
             });
         });
-    }, [selectedParcelIds]);
+    }, [selectedParcelIds, highlightedParcelId]);
 
     useEffect(() => {
         if (!mapContainerRef.current || hasInitializedRef.current || typeof window === 'undefined') return;
@@ -478,12 +481,13 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze, selectedParcelId
                             parcels.forEach((parcel: GeneratedParcel) => {
                                 const coordinates: LatLngExpression[] = parcel.geometry.map((point: Point) => [point.lat, point.lon]);
                                 const isSelected = selectedParcelIds.includes(parcel.id);
+                                const isHighlighted = highlightedParcelId === parcel.id;
                                 const polygon = L.polygon(coordinates, {
-                                    fillColor: isSelected ? '#FFD700' : '#000000',
-                                    color: isSelected ? '#FFD700' : '#000000',
-                                    weight: 1,
-                                    opacity: 0.5,
-                                    fillOpacity: 0.3
+                                    fillColor: isHighlighted ? '#FF4500' : isSelected ? '#FFD700' : '#000000',
+                                    color: isHighlighted ? '#FF4500' : isSelected ? '#FFD700' : '#000000',
+                                    weight: isHighlighted ? 2 : 1,
+                                    opacity: isHighlighted ? 0.8 : 0.5,
+                                    fillOpacity: isHighlighted ? 0.5 : 0.3
                                 }).addTo(map);
 
                                 // Add click handler for parcels
@@ -608,7 +612,7 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze, selectedParcelId
                 hasInitializedRef.current = false;
             }
         };
-    }, [onAnalyze, onParcelSelect, selectedParcelIds]);
+    }, [onAnalyze, onParcelSelect, selectedParcelIds, highlightedParcelId]);
 
     return (
         <div className="relative w-full h-full">

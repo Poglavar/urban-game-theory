@@ -1,16 +1,17 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { useAccount } from "wagmi";
+import { useState, useRef, useEffect, useCallback, useContext } from "react";
+import { useAccount, useWalletClient } from "wagmi";
 import { RainbowKitCustomConnectButton } from "~~/components/scaffold-eth";
 import { useScaffoldWriteContract } from "~~/hooks/scaffold-eth/useScaffoldWriteContract";
-import { useScaffoldReadContract } from "~~/hooks/scaffold-eth/useScaffoldReadContract";
 import { useScaffoldContract } from "~~/hooks/scaffold-eth/useScaffoldContract";
+import { useScaffoldReadContract } from "~~/hooks/scaffold-eth/useScaffoldReadContract";
 import MapView from "~~/components/map/MapView";
 import type { Parcel } from "~~/types/parcel";
 import { toPng } from "html-to-image";
 import { notification } from "~~/utils/scaffold-eth";
-import { Contract } from "ethers";
+import type { Contract } from "~~/utils/scaffold-eth/contract";
+import React from "react";
 
 // Extend Window interface to include analyzeArea
 declare global {
@@ -59,8 +60,423 @@ interface ProposalResponse {
   isActive: boolean;
 }
 
+// Add this interface with the other interfaces at the top of the file
+interface OwnedParcel {
+  id: string;
+  owner: string;
+  osmId: string;
+}
+
+// Update ControlsPanel to be memoized and only receive necessary props
+const ControlsPanel = React.memo(({
+  isAnalyzingParcels,
+  setIsAnalyzingParcels,
+  hasSelectedParcels,
+  onCreateProposal,
+  onLoadProposals,
+  onShowMemeToken,
+  isLoadingProposals,
+}: {
+  isAnalyzingParcels: boolean;
+  setIsAnalyzingParcels: (value: boolean) => void;
+  hasSelectedParcels: boolean;
+  onCreateProposal: () => void;
+  onLoadProposals: () => void;
+  onShowMemeToken: () => void;
+  isLoadingProposals: boolean;
+}) => {
+  return (
+    <div className="p-4">
+      <h2 className="text-2xl font-bold mb-4">Controls</h2>
+      <div className="space-y-4">
+        <div>
+          <button
+            className="btn btn-primary w-full"
+            onClick={() => {
+              setIsAnalyzingParcels(true);
+              (window as any).analyzeArea?.();
+            }}
+            disabled={isAnalyzingParcels}
+          >
+            {isAnalyzingParcels ? 'Loading...' : 'Load Parcel Data'}
+          </button>
+        </div>
+        <div>
+          <button
+            className="btn btn-secondary w-full"
+            disabled={!hasSelectedParcels}
+            onClick={onCreateProposal}
+          >
+            Create Proposal
+          </button>
+        </div>
+        <div>
+          <button
+            className={`btn btn-accent w-full flex items-center justify-center gap-2`}
+            onClick={onLoadProposals}
+            disabled={isLoadingProposals}
+          >
+            {isLoadingProposals ? (
+              <>
+                <span className="inline-block animate-bounce">⬇</span>
+                <span>Loading Proposals</span>
+                <span className="inline-block animate-bounce" style={{ animationDelay: '0.2s' }}>⬇</span>
+              </>
+            ) : (
+              'Load All Proposals'
+            )}
+          </button>
+        </div>
+        <div>
+          <button
+            className="btn w-full bg-gradient-to-r from-pink-500 to-purple-500 text-white hover:from-pink-600 hover:to-purple-600"
+            onClick={onShowMemeToken}
+          >
+            Meme Token Status
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+// Add this helper function near the top of the file, after the interfaces
+const calculateDimensions = (geometry: Array<{ lat: number; lon: number }>) => {
+  const lats = geometry.map(p => p.lat);
+  const lons = geometry.map(p => p.lon);
+
+  // Calculate height and width in meters (approximate)
+  const latDiff = Math.max(...lats) - Math.min(...lats);
+  const lonDiff = Math.max(...lons) - Math.min(...lons);
+
+  // Convert to meters (rough approximation)
+  const metersPerLat = 111320; // meters per degree of latitude
+  const metersPerLon = 111320 * Math.cos(geometry[0].lat * Math.PI / 180); // meters per degree of longitude at this latitude
+
+  return {
+    width: (lonDiff * metersPerLon).toFixed(1),
+    height: (latDiff * metersPerLat).toFixed(1)
+  };
+};
+
+// Update BuildingDetailsTooltip to handle null buildingDetails
+const BuildingDetailsTooltip = ({ buildingDetails }: { buildingDetails: BuildingDetails | null }) => {
+  if (!buildingDetails) {
+    return <div className="p-3">Loading building details...</div>;
+  }
+
+  const { width, height } = calculateDimensions(buildingDetails.geometry);
+
+  return (
+    <div className="max-w-sm space-y-2 p-3 text-base-content">
+      <div>
+        <span className="font-semibold text-primary">Building ID:</span> {buildingDetails.id}
+      </div>
+      <div>
+        <span className="font-semibold text-primary">Area:</span> {(buildingDetails.area * 1000000).toFixed(1)} m²
+      </div>
+      <div>
+        <span className="font-semibold text-primary">Location:</span> {buildingDetails.center.lat.toFixed(6)}, {buildingDetails.center.lon.toFixed(6)}
+      </div>
+      <div>
+        <span className="font-semibold text-primary">Dimensions:</span>
+        <div className="pl-3 space-y-1">
+          <div>Width: ~{width} m</div>
+          <div>Height: ~{height} m</div>
+          <div>Vertices: {buildingDetails.geometry.length}</div>
+        </div>
+      </div>
+      {Object.entries(buildingDetails.tags).length > 0 && (
+        <div>
+          <span className="font-semibold text-primary">Building Tags:</span>
+          <div className="pl-3 space-y-1">
+            {Object.entries(buildingDetails.tags).map(([key, value]) => (
+              <div key={key}>
+                <span className="font-medium">{key}:</span> {value}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Update the ListPanel component
+const ListPanel = React.memo(({ onParcelSelect }: { onParcelSelect?: (parcelId: string | null, buildingDetails: BuildingDetails | null) => void }) => {
+  const { selectedParcels, activeTab, setActiveTab, parcelOwners, parcelNFTContract, setParcelOwners, setHighlightedParcelId } = useContext(AppContext);
+  const { address } = useAccount();
+  const [ownedParcels, setOwnedParcels] = useState<OwnedParcel[]>([]);
+  const [isLoadingOwned, setIsLoadingOwned] = useState(false);
+
+  const handleParcelClick = (parcelId: string) => {
+    setHighlightedParcelId(parcelId);
+  };
+
+  // Fetch owned parcels when the "my" tab is active
+  useEffect(() => {
+    const fetchOwnedParcels = async () => {
+      if (!parcelNFTContract || !address || activeTab !== "my") return;
+
+      setIsLoadingOwned(true);
+      try {
+        console.log('Fetching owned parcels for address:', address);
+
+        // Get the number of parcels owned by the address
+        const balance = await parcelNFTContract.read.balanceOf([address]);
+        console.log('Balance:', balance);
+
+        const owned: OwnedParcel[] = [];
+        // Iterate through each owned token
+        for (let i = 0; i < Number(balance); i++) {
+          try {
+            // Get token ID at index i for the owner
+            const tokenId = await parcelNFTContract.read.tokenOfOwnerByIndex([address, BigInt(i)]);
+            console.log(`Token ${i}:`, tokenId);
+
+            // Get parcel details
+            const parcel = await parcelNFTContract.read.getParcel([tokenId]);
+            owned.push({
+              id: tokenId.toString(),
+              owner: address,
+              osmId: parcel.osmId.toString()
+            } as OwnedParcel);
+          } catch (error) {
+            console.error('Error fetching token:', error);
+          }
+        }
+
+        setOwnedParcels(owned);
+      } catch (error) {
+        console.error('Error fetching owned parcels:', error);
+      } finally {
+        setIsLoadingOwned(false);
+      }
+    };
+
+    fetchOwnedParcels();
+  }, [parcelNFTContract, address, activeTab]);
+
+  // Fetch owners for selected parcels
+  useEffect(() => {
+    const fetchOwners = async () => {
+      console.log('ListPanel Contract Status:', {
+        hasContract: !!parcelNFTContract,
+        contractAddress: parcelNFTContract?.target,
+        selectedParcels: selectedParcels.length,
+        contractMethods: parcelNFTContract ? Object.keys(parcelNFTContract) : [],
+        contractFunctions: parcelNFTContract ? Object.getOwnPropertyNames(Object.getPrototypeOf(parcelNFTContract)) : []
+      });
+
+      if (!parcelNFTContract) {
+        console.error('ParcelNFT contract not available in ListPanel');
+        return;
+      }
+
+      const newParcelIds = selectedParcels
+        .filter(parcel => !parcelOwners[parcel.id])
+        .map(parcel => parcel.id);
+
+      console.log('Fetching owners for parcels:', {
+        newParcelIds,
+        currentOwners: parcelOwners
+      });
+
+      for (const parcelId of newParcelIds) {
+        try {
+          console.log(`Checking ownership for parcel ${parcelId} using contract at ${parcelNFTContract.target}`);
+          const owner = await parcelNFTContract.read.ownerOf([BigInt(parcelId)]);
+          console.log(`Owner found for parcel ${parcelId}:`, owner);
+          setParcelOwners(prev => ({ ...prev, [parcelId]: owner }));
+        } catch (error) {
+          console.error(`Error checking ownership for parcel ${parcelId}:`, {
+            error,
+            errorMessage: error instanceof Error ? error.message : 'Unknown error'
+          });
+          setParcelOwners(prev => ({ ...prev, [parcelId]: "Not minted" }));
+        }
+      }
+    };
+
+    if (selectedParcels.length > 0) {
+      fetchOwners();
+    }
+  }, [selectedParcels, parcelNFTContract, parcelOwners, setParcelOwners]);
+
+  return (
+    <div className="p-4">
+      <div role="tablist" className="tabs tabs-lifted">
+        <a
+          role="tab"
+          className={`tab tab-lg ${activeTab === "my" ? "tab-active" : ""}`}
+          onClick={() => setActiveTab("my")}
+        >
+          My Parcels {ownedParcels.length > 0 ? `(${ownedParcels.length})` : ''}
+        </a>
+        <a
+          role="tab"
+          className={`tab tab-lg ${activeTab === "selected" ? "tab-active" : ""}`}
+          onClick={() => setActiveTab("selected")}
+        >
+          Selected Parcels{selectedParcels.length > 0 ? ` (${selectedParcels.length})` : ''}
+        </a>
+      </div>
+
+      <div className={`p-4 bg-base-100 rounded-b-box border-base-300 border-2 border-t-0`}>
+        {activeTab === "selected" ? (
+          <div className="space-y-2">
+            {selectedParcels.length > 0 ? (
+              selectedParcels.map((parcel) => (
+                <div key={parcel.id} className="bg-base-200 p-4 rounded-lg relative">
+                  <button
+                    className="btn btn-ghost btn-xs absolute top-2 right-2"
+                    onClick={() => {
+                      onParcelSelect?.(parcel.id, null);
+                    }}
+                  >
+                    ✕
+                  </button>
+                  <h3 className="text-xl font-semibold mb-2">Parcel</h3>
+                  <div className="group relative inline-block">
+                    <div className="text-sm hover:text-primary cursor-help">
+                      {parcel.id}
+                      <div className="opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-200 absolute left-0 top-full mt-1 z-[99999] bg-[#e6d5b8] rounded-lg shadow-xl border border-[#d4bc94] w-[25vw] text-black transform -translate-x-1/4">
+                        <BuildingDetailsTooltip buildingDetails={parcel.buildingDetails} />
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-sm text-base-content/70">Building: {parcel.buildingDetails?.tags.building || 'Unknown'}</p>
+                  <p className="text-sm text-base-content/70 mt-1">
+                    Owner: {parcelOwners[parcel.id] === "Not minted" ? (
+                      <span className="text-warning">Not minted</span>
+                    ) : parcelOwners[parcel.id] ? (
+                      <span className="font-mono">{parcelOwners[parcel.id]}</span>
+                    ) : (
+                      <span className="loading loading-dots">Loading</span>
+                    )}
+                  </p>
+                </div>
+              ))
+            ) : (
+              <p>No parcels selected</p>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {!address ? (
+              <div className="text-center py-8">
+                <p className="text-base-content/70 mb-4">Connect your wallet to view your parcels</p>
+                <RainbowKitCustomConnectButton />
+              </div>
+            ) : isLoadingOwned ? (
+              <div className="text-center py-8">
+                <span className="loading loading-spinner loading-lg"></span>
+                <p className="mt-4 text-base-content/70">Loading your parcels...</p>
+              </div>
+            ) : ownedParcels.length > 0 ? (
+              ownedParcels.map((parcel) => (
+                <div
+                  key={parcel.id}
+                  className="bg-base-200 p-4 rounded-lg cursor-pointer hover:bg-base-300 transition-colors"
+                  onClick={() => handleParcelClick(parcel.id)}
+                >
+                  <h3 className="text-xl font-semibold mb-2">Parcel</h3>
+                  <p className="text-sm">ID: {parcel.id}</p>
+                  <p className="text-sm">OSM ID: {parcel.osmId}</p>
+                  <p className="text-sm text-base-content/70 mt-1">
+                    Owner: <span className="font-mono">{parcel.owner}</span>
+                  </p>
+                </div>
+              ))
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-base-content/70">You don't own any parcels yet</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
+// Create AppContext
+const AppContext = React.createContext<{
+  selectedParcels: SelectedParcel[];
+  activeTab: string;
+  setActiveTab: (tab: string) => void;
+  parcelOwners: Record<string, string>;
+  parcelNFTContract: Contract<any> | null;
+  setParcelOwners: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  firstProposal: any;
+  setShowProposalModal: (show: boolean) => void;
+  highlightedParcelId: string | null;
+  setHighlightedParcelId: (id: string | null) => void;
+}>({
+  selectedParcels: [],
+  activeTab: "my",
+  setActiveTab: () => { },
+  parcelOwners: {},
+  parcelNFTContract: null,
+  setParcelOwners: () => { },
+  firstProposal: null,
+  setShowProposalModal: () => { },
+  highlightedParcelId: null,
+  setHighlightedParcelId: () => { },
+});
+
+// Update ProposalsPanel to be memoized
+const ProposalsPanel = React.memo(({ proposals, loadAllProposals }: { proposals: ProposalData[]; loadAllProposals: () => Promise<void> }) => {
+  const { selectedParcels, setShowProposalModal } = useContext(AppContext);
+
+  return (
+    <div className="p-4">
+      <h2 className="text-2xl font-bold mb-4">Proposals</h2>
+      <div className="space-y-4">
+        {proposals.length > 0 ? (
+          <div className="grid grid-cols-1 gap-4">
+            {proposals.map((proposal) => (
+              <div key={proposal.tokenId} className="card bg-base-100 shadow-xl">
+                <div className="card-body">
+                  <div className="flex justify-between items-start">
+                    <h3 className="card-title text-lg">{proposal.metadata.name}</h3>
+                    <span className="badge badge-accent">{proposal.metadata.type}</span>
+                  </div>
+                  <p className="text-sm text-base-content/70 mt-2">{proposal.metadata.description}</p>
+                  <div className="mt-4 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span>Parcels Involved:</span>
+                      <span className="font-medium">{proposal.parcelIds.length}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>Status:</span>
+                      <span className="text-success">Active</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>Conditional:</span>
+                      <span>{proposal.metadata.attributes.find(attr => attr.trait_type === "Conditional")?.value || "No"}</span>
+                    </div>
+                  </div>
+                  <div className="card-actions justify-end mt-4">
+                    <button className="btn btn-sm btn-primary">View Details</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-8">
+            <p className="text-base-content/70">No proposals loaded yet</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
 export default function Home() {
   const { address } = useAccount();
+  const { data: walletClient } = useWalletClient();
   const [selectedParcels, setSelectedParcels] = useState<SelectedParcel[]>([]);
   const [isAnalyzingParcels, setIsAnalyzingParcels] = useState(false);
   const [showProposalModal, setShowProposalModal] = useState(false);
@@ -71,6 +487,8 @@ export default function Home() {
   const [isLoadingProposals, setIsLoadingProposals] = useState(false);
   const [memeTokenData, setMemeTokenData] = useState<any>(null);
   const [isLoadingMemeData, setIsLoadingMemeData] = useState(false);
+  const [highlightedParcelId, setHighlightedParcelId] = useState<string | null>(null);
+  const [proposals, setProposals] = useState<ProposalData[]>([]);
 
   const { writeContractAsync: writeProposalNFT } = useScaffoldWriteContract({
     contractName: "ProposalNFT",
@@ -78,7 +496,7 @@ export default function Home() {
 
   const { data: memeTokenContract } = useScaffoldContract({
     contractName: "CityMemeToken",
-  }) as { data: Contract | null };
+  }) as { data: Contract<any> | null };
 
   const { data: totalSupply } = useScaffoldReadContract({
     contractName: "CityMemeToken",
@@ -97,95 +515,66 @@ export default function Home() {
     args: [BigInt(0)],
   });
 
-  const loadAllProposals = async () => {
-    if (!firstProposal) {
-      notification.error("Contract not initialized");
+  // Update the ParcelNFT contract hook with proper typing and options
+  const { data: parcelNFTContract, isLoading: isParcelNFTLoading } = useScaffoldContract({
+    contractName: "ParcelNFT",
+    walletClient: walletClient,
+  }) as { data: Contract<any> | null; isLoading: boolean };
+
+  // Add this state to store parcel owners
+  const [parcelOwners, setParcelOwners] = useState<Record<string, string>>({});
+
+  // Add these hooks at the top level with other hooks
+  const { data: proposalData } = useScaffoldReadContract({
+    contractName: "ProposalNFT",
+    functionName: "getProposal",
+    args: [BigInt(0)],
+  });
+
+  const { data: tokenURIData } = useScaffoldReadContract({
+    contractName: "ProposalNFT",
+    functionName: "tokenURI",
+    args: [BigInt(0)],
+  });
+
+  // Add ProposalNFT contract hook
+  const { data: proposalNFTContract } = useScaffoldContract({
+    contractName: "ProposalNFT",
+    walletClient: walletClient,
+  }) as { data: Contract<any> | null };
+
+  // Update the fetchParcelOwner function with proper typing
+  const fetchParcelOwner = async (parcelId: string) => {
+    if (!parcelNFTContract) {
+      console.error('ParcelNFT contract not initialized:', {
+        hasContract: !!parcelNFTContract,
+        isLoading: isParcelNFTLoading
+      });
       return;
     }
 
-    setIsLoadingProposals(true);
     try {
-      // Get all proposals by iterating through token IDs
-      let tokenId = BigInt(0);
-      const proposals: ProposalData[] = [];
+      console.log('Attempting to check ownership for parcel:', {
+        parcelId,
+        contractAddress: parcelNFTContract.target,
+        contractMethods: Object.keys(parcelNFTContract),
+        contractFunctions: Object.getOwnPropertyNames(Object.getPrototypeOf(parcelNFTContract))
+      });
 
-      while (true) {
-        try {
-          // Try to get proposal data
-          const { data: proposal } = await useScaffoldReadContract({
-            contractName: "ProposalNFT",
-            functionName: "getProposal",
-            args: [tokenId],
-          });
-
-          if (!proposal || !proposal.isActive) {
-            tokenId = tokenId + BigInt(1);
-            continue;
-          }
-
-          // Get token URI
-          const { data: uri } = await useScaffoldReadContract({
-            contractName: "ProposalNFT",
-            functionName: "tokenURI",
-            args: [tokenId],
-          });
-
-          if (!uri) {
-            tokenId = tokenId + BigInt(1);
-            continue;
-          }
-
-          // Remove ipfs:// prefix if present
-          const cleanUri = uri.replace("ipfs://", "");
-
-          // Fetch metadata from IPFS via Pinata gateway
-          const metadataResponse = await fetch(`https://gateway.pinata.cloud/ipfs/${cleanUri}`);
-          if (!metadataResponse.ok) {
-            tokenId = tokenId + BigInt(1);
-            continue;
-          }
-
-          const metadata = await metadataResponse.json();
-
-          proposals.push({
-            tokenId: Number(tokenId),
-            metadata,
-            parcelIds: [...proposal.parcelIds] // Spread operator to create new mutable array
-          });
-
-          tokenId = tokenId + BigInt(1);
-        } catch (error) {
-          // If we get an error, we've likely reached the end of valid tokens
-          break;
-        }
-      }
-
-      // Get unique parcel IDs from all valid proposals
-      const uniqueParcelIds = new Set(
-        proposals.flatMap(proposal => proposal.parcelIds)
-      );
-
-      // Update selected parcels with proper typing
-      const newSelectedParcels: SelectedParcel[] = Array.from(uniqueParcelIds).map(parcelId => ({
-        id: parcelId.toString(),
-        buildingDetails: null
-      }));
-
-      notification.success(`Loaded ${proposals.length} proposals with ${uniqueParcelIds.size} unique parcels`);
-
-      // Update selected parcels without triggering analysis
-      setSelectedParcels(newSelectedParcels);
-      setActiveTab("selected");
-
+      const owner = await parcelNFTContract.read.ownerOf([BigInt(parcelId)]);
+      console.log('Owner found for parcel', parcelId, ':', owner);
+      setParcelOwners(prev => ({ ...prev, [parcelId]: owner }));
     } catch (error) {
-      console.error("Error loading proposals:", error);
-      notification.error(error instanceof Error ? error.message : "Failed to load proposals");
-    } finally {
-      setIsLoadingProposals(false);
+      console.error('Error checking ownership for parcel', parcelId, ':', {
+        error,
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        contractAddress: parcelNFTContract.target
+      });
+      setParcelOwners(prev => ({ ...prev, [parcelId]: "Not minted" }));
     }
   };
 
-  const handleParcelSelect = (parcelId: string | null, buildingDetails: BuildingDetails | null) => {
+  const handleParcelSelect = useCallback((parcelId: string | null, buildingDetails: BuildingDetails | null) => {
     if (!parcelId) return;
 
     setSelectedParcels(prevParcels => {
@@ -201,7 +590,80 @@ export default function Home() {
       }
       return prevParcels;
     });
-  };
+  }, []);
+
+  // Update the loadAllProposals function to be memoized
+  const loadAllProposals = useCallback(async () => {
+    if (!proposalNFTContract) {
+      notification.error("Contract not initialized");
+      return;
+    }
+
+    setIsLoadingProposals(true);
+    try {
+      const loadedProposals: ProposalData[] = [];
+
+      // Get total number of proposals using ERC721Enumerable
+      const totalSupply = await proposalNFTContract.read.totalSupply();
+
+      // Load each proposal by index
+      for (let i = 0; i < totalSupply; i++) {
+        try {
+          // Get token ID at current index
+          const tokenId = await proposalNFTContract.read.tokenByIndex([BigInt(i)]);
+
+          // Get proposal data
+          const proposal = await proposalNFTContract.read.getProposal([tokenId]);
+
+          // Skip inactive proposals
+          if (!proposal || !proposal.isActive) {
+            continue;
+          }
+
+          // Get token URI
+          const uri = await proposalNFTContract.read.tokenURI([tokenId]);
+          if (!uri) {
+            continue;
+          }
+
+          // Remove ipfs:// prefix if present
+          const cleanUri = uri.replace("ipfs://", "");
+
+          // Fetch metadata from IPFS via Pinata gateway
+          const metadataResponse = await fetch(`https://gateway.pinata.cloud/ipfs/${cleanUri}`);
+          if (!metadataResponse.ok) {
+            console.warn(`Failed to fetch metadata for token ${tokenId}`);
+            continue;
+          }
+
+          const metadata = await metadataResponse.json();
+          loadedProposals.push({
+            tokenId: Number(tokenId),
+            metadata,
+            parcelIds: [...proposal.parcelIds]
+          });
+
+        } catch (error) {
+          console.warn(`Error loading proposal at index ${i}:`, error);
+          continue;
+        }
+      }
+
+      if (loadedProposals.length === 0) {
+        notification.warning("No active proposals found");
+        return;
+      }
+
+      notification.success(`Loaded ${loadedProposals.length} active proposal${loadedProposals.length === 1 ? '' : 's'}`);
+      setProposals(loadedProposals);
+
+    } catch (error) {
+      console.error("Error loading proposals:", error);
+      notification.error(error instanceof Error ? error.message : "Failed to load proposals");
+    } finally {
+      setIsLoadingProposals(false);
+    }
+  }, [proposalNFTContract, setIsLoadingProposals, setProposals]);
 
   // Proposal Modal Component
   const ProposalModal = () => {
@@ -541,7 +1003,7 @@ export default function Home() {
   const MemeTokenModal = ({ showMemeTokenModal, setShowMemeTokenModal, memeTokenContract, totalSupply, owner }: {
     showMemeTokenModal: boolean;
     setShowMemeTokenModal: (show: boolean) => void;
-    memeTokenContract: Contract | null;
+    memeTokenContract: Contract<any> | null;
     totalSupply: bigint | undefined;
     owner: string | undefined;
   }) => {
@@ -634,329 +1096,75 @@ export default function Home() {
     );
   };
 
-  // Update ControlsPanel to use firstProposal for button disable state
-  const ControlsPanel = () => {
-    return (
-      <div className="p-4">
-        <h2 className="text-2xl font-bold mb-4">Controls</h2>
-        <div className="space-y-4">
-          <div>
-            <button
-              className={`btn btn-primary w-full ${isAnalyzingParcels ? 'loading' : ''}`}
-              onClick={() => {
-                setIsAnalyzingParcels(true);
-                (window as any).analyzeArea?.();
-              }}
-              disabled={isAnalyzingParcels}
-            >
-              {isAnalyzingParcels ? 'Loading...' : 'Load Parcel Data'}
-            </button>
-          </div>
-          <div>
-            <button
-              className="btn btn-secondary w-full"
-              disabled={selectedParcels.length === 0}
-              onClick={() => setShowProposalModal(true)}
-            >
-              Create Proposal
-            </button>
-          </div>
-          <div>
-            <button
-              className={`btn btn-accent w-full flex items-center justify-center gap-2`}
-              onClick={loadAllProposals}
-              disabled={isLoadingProposals || !firstProposal}
-            >
-              {isLoadingProposals ? (
-                <>
-                  <span className="inline-block animate-bounce">⬇</span>
-                  <span>Loading Proposals</span>
-                  <span className="inline-block animate-bounce" style={{ animationDelay: '0.2s' }}>⬇</span>
-                </>
-              ) : (
-                'Load All Proposals'
-              )}
-            </button>
-          </div>
-          <div>
-            <button
-              className="btn w-full bg-gradient-to-r from-pink-500 to-purple-500 text-white hover:from-pink-600 hover:to-purple-600"
-              onClick={() => setShowMemeTokenModal(true)}
-            >
-              Meme Token Status
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
+  // Add callback handlers for ControlsPanel
+  const handleCreateProposal = useCallback(() => {
+    setShowProposalModal(true);
+  }, []);
 
-  // Add this helper function near the top of the file, after the interfaces
-  const calculateDimensions = (geometry: Array<{ lat: number; lon: number }>) => {
-    const lats = geometry.map(p => p.lat);
-    const lons = geometry.map(p => p.lon);
+  const handleShowMemeToken = useCallback(() => {
+    setShowMemeTokenModal(true);
+  }, []);
 
-    // Calculate height and width in meters (approximate)
-    const latDiff = Math.max(...lats) - Math.min(...lats);
-    const lonDiff = Math.max(...lons) - Math.min(...lons);
-
-    // Convert to meters (rough approximation)
-    const metersPerLat = 111320; // meters per degree of latitude
-    const metersPerLon = 111320 * Math.cos(geometry[0].lat * Math.PI / 180); // meters per degree of longitude at this latitude
-
-    return {
-      width: (lonDiff * metersPerLon).toFixed(1),
-      height: (latDiff * metersPerLat).toFixed(1)
-    };
-  };
-
-  // Update BuildingDetailsTooltip to handle null buildingDetails
-  const BuildingDetailsTooltip = ({ buildingDetails }: { buildingDetails: BuildingDetails | null }) => {
-    if (!buildingDetails) {
-      return <div className="p-3">Loading building details...</div>;
-    }
-
-    const { width, height } = calculateDimensions(buildingDetails.geometry);
-
-    return (
-      <div className="max-w-sm space-y-2 p-3 text-base-content">
-        <div>
-          <span className="font-semibold text-primary">Building ID:</span> {buildingDetails.id}
-        </div>
-        <div>
-          <span className="font-semibold text-primary">Area:</span> {(buildingDetails.area * 1000000).toFixed(1)} m²
-        </div>
-        <div>
-          <span className="font-semibold text-primary">Location:</span> {buildingDetails.center.lat.toFixed(6)}, {buildingDetails.center.lon.toFixed(6)}
-        </div>
-        <div>
-          <span className="font-semibold text-primary">Dimensions:</span>
-          <div className="pl-3 space-y-1">
-            <div>Width: ~{width} m</div>
-            <div>Height: ~{height} m</div>
-            <div>Vertices: {buildingDetails.geometry.length}</div>
-          </div>
-        </div>
-        {Object.entries(buildingDetails.tags).length > 0 && (
-          <div>
-            <span className="font-semibold text-primary">Building Tags:</span>
-            <div className="pl-3 space-y-1">
-              {Object.entries(buildingDetails.tags).map(([key, value]) => (
-                <div key={key}>
-                  <span className="font-medium">{key}:</span> {value}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Update the ListPanel's parcel rendering
-  const ListPanel = ({ onParcelSelect }: { onParcelSelect?: (parcelId: string | null, buildingDetails: BuildingDetails | null) => void }) => {
-    return (
-      <div className="p-4">
-        <div role="tablist" className="tabs tabs-lifted">
-          <a
-            role="tab"
-            className={`tab tab-lg ${activeTab === "my" ? "tab-active" : ""}`}
-            onClick={() => setActiveTab("my")}
-          >
-            My Parcels (0)
-          </a>
-          <a
-            role="tab"
-            className={`tab tab-lg ${activeTab === "selected" ? "tab-active" : ""}`}
-            onClick={() => setActiveTab("selected")}
-          >
-            Selected Parcels{selectedParcels.length > 0 ? ` (${selectedParcels.length})` : ''}
-          </a>
-        </div>
-
-        <div className={`p-4 bg-base-100 rounded-b-box border-base-300 border-2 border-t-0`}>
-          {activeTab === "selected" ? (
-            <div className="space-y-2">
-              {selectedParcels.length > 0 ? (
-                selectedParcels.map((parcel) => (
-                  <div key={parcel.id} className="bg-base-200 p-4 rounded-lg relative">
-                    <button
-                      className="btn btn-ghost btn-xs absolute top-2 right-2"
-                      onClick={() => {
-                        onParcelSelect?.(parcel.id, null);
-                      }}
-                    >
-                      ✕
-                    </button>
-                    <h3 className="text-xl font-semibold mb-2">Parcel</h3>
-                    <div className="group relative inline-block">
-                      <div className="text-sm hover:text-primary cursor-help">
-                        {parcel.id}
-                        <div className="opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-200 absolute left-0 top-full mt-1 z-[99999] bg-[#e6d5b8] rounded-lg shadow-xl border border-[#d4bc94] w-[25vw] text-black transform -translate-x-1/4">
-                          <BuildingDetailsTooltip buildingDetails={parcel.buildingDetails} />
-                        </div>
-                      </div>
-                    </div>
-                    <p className="text-sm text-base-content/70">Building: {parcel.buildingDetails?.tags.building || 'Unknown'}</p>
-                  </div>
-                ))
-              ) : (
-                <p>No parcels selected</p>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <p>No parcels owned yet</p>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  // Replace DetailsPanel with ProposalsPanel
-  const ProposalsPanel = () => {
-    return (
-      <div className="p-4">
-        <h2 className="text-2xl font-bold mb-4">Proposals</h2>
-        <div className="space-y-4">
-          {firstProposal ? (
-            <div className="grid grid-cols-1 gap-4">
-              <div className="card bg-base-100 shadow-xl">
-                <div className="card-body">
-                  <div className="flex justify-between items-start">
-                    <h3 className="card-title text-lg">New Park Development</h3>
-                    <span className="badge badge-accent">Park</span>
-                  </div>
-                  <p className="text-sm text-base-content/70 mt-2">Create a new public park with recreational facilities</p>
-                  <div className="mt-4 space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span>Parcels Involved:</span>
-                      <span className="font-medium">3</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span>Status:</span>
-                      <span className="text-success">Active</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span>Conditional:</span>
-                      <span>Yes</span>
-                    </div>
-                  </div>
-                  <div className="card-actions justify-end mt-4">
-                    <button className="btn btn-sm btn-primary">View Details</button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="card bg-base-100 shadow-xl">
-                <div className="card-body">
-                  <div className="flex justify-between items-start">
-                    <h3 className="card-title text-lg">Road Extension</h3>
-                    <span className="badge badge-secondary">Road</span>
-                  </div>
-                  <p className="text-sm text-base-content/70 mt-2">Extend the main road to improve connectivity</p>
-                  <div className="mt-4 space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span>Parcels Involved:</span>
-                      <span className="font-medium">5</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span>Status:</span>
-                      <span className="text-success">Active</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span>Conditional:</span>
-                      <span>No</span>
-                    </div>
-                  </div>
-                  <div className="card-actions justify-end mt-4">
-                    <button className="btn btn-sm btn-primary">View Details</button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="card bg-base-100 shadow-xl">
-                <div className="card-body">
-                  <div className="flex justify-between items-start">
-                    <h3 className="card-title text-lg">Mixed-Use Development</h3>
-                    <span className="badge badge-warning">Mixed</span>
-                  </div>
-                  <p className="text-sm text-base-content/70 mt-2">Create a mixed-use area with retail and residential spaces</p>
-                  <div className="mt-4 space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span>Parcels Involved:</span>
-                      <span className="font-medium">8</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span>Status:</span>
-                      <span className="text-success">Active</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span>Conditional:</span>
-                      <span>Yes</span>
-                    </div>
-                  </div>
-                  <div className="card-actions justify-end mt-4">
-                    <button className="btn btn-sm btn-primary">View Details</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="text-center py-8">
-              <p className="text-base-content/70">No proposals available yet</p>
-              <button
-                className="btn btn-primary mt-4"
-                onClick={() => setShowProposalModal(true)}
-                disabled={selectedParcels.length === 0}
-              >
-                Create First Proposal
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    );
+  const contextValue = {
+    selectedParcels,
+    activeTab,
+    setActiveTab,
+    parcelOwners,
+    parcelNFTContract,
+    setParcelOwners,
+    firstProposal,
+    setShowProposalModal,
+    highlightedParcelId,
+    setHighlightedParcelId,
   };
 
   return (
-    <div className="flex flex-wrap h-screen">
-      {/* Upper Left - Map */}
-      <div className="w-1/2 h-1/2 border-r border-b border-base-300">
-        <MapView
-          onParcelSelect={handleParcelSelect}
-          onAnalyze={() => {
-            setIsAnalyzingParcels(false);
-          }}
-          selectedParcelIds={selectedParcels.map(p => p.id)}
+    <AppContext.Provider value={contextValue}>
+      <div className="flex flex-wrap h-screen">
+        {/* Upper Left - Map */}
+        <div className="w-1/2 h-1/2 border-r border-b border-base-300">
+          <MapView
+            onParcelSelect={handleParcelSelect}
+            onAnalyze={() => setIsAnalyzingParcels(false)}
+            selectedParcelIds={selectedParcels.map(p => p.id)}
+            highlightedParcelId={highlightedParcelId}
+            isAnalyzing={isAnalyzingParcels}
+          />
+        </div>
+
+        {/* Upper Right - Controls */}
+        <div className="w-1/2 h-1/2 border-b border-base-300">
+          <ControlsPanel
+            isAnalyzingParcels={isAnalyzingParcels}
+            setIsAnalyzingParcels={setIsAnalyzingParcels}
+            hasSelectedParcels={selectedParcels.length > 0}
+            onCreateProposal={handleCreateProposal}
+            onLoadProposals={loadAllProposals}
+            onShowMemeToken={handleShowMemeToken}
+            isLoadingProposals={isLoadingProposals}
+          />
+        </div>
+
+        {/* Lower Left - List */}
+        <div className="w-1/2 h-1/2 border-r border-base-300 overflow-auto">
+          <ListPanel onParcelSelect={handleParcelSelect} />
+        </div>
+
+        {/* Lower Right - Proposals */}
+        <div className="w-1/2 h-1/2 overflow-auto">
+          <ProposalsPanel proposals={proposals} loadAllProposals={loadAllProposals} />
+        </div>
+
+        {/* Proposal Modal */}
+        <ProposalModal />
+        <MemeTokenModal
+          showMemeTokenModal={showMemeTokenModal}
+          setShowMemeTokenModal={setShowMemeTokenModal}
+          memeTokenContract={memeTokenContract}
+          totalSupply={totalSupply}
+          owner={owner}
         />
       </div>
-
-      {/* Upper Right - Controls */}
-      <div className="w-1/2 h-1/2 border-b border-base-300">
-        <ControlsPanel />
-      </div>
-
-      {/* Lower Left - List */}
-      <div className="w-1/2 h-1/2 border-r border-base-300 overflow-auto">
-        <ListPanel onParcelSelect={handleParcelSelect} />
-      </div>
-
-      {/* Lower Right - Proposals */}
-      <div className="w-1/2 h-1/2 overflow-auto">
-        <ProposalsPanel />
-      </div>
-
-      {/* Proposal Modal */}
-      <ProposalModal />
-      <MemeTokenModal
-        showMemeTokenModal={showMemeTokenModal}
-        setShowMemeTokenModal={setShowMemeTokenModal}
-        memeTokenContract={memeTokenContract}
-        totalSupply={totalSupply}
-        owner={owner}
-      />
-    </div>
+    </AppContext.Provider>
   );
 }

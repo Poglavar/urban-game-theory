@@ -2,37 +2,51 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract ParcelNFT is ERC721URIStorage, Ownable {
+contract ParcelNFT is ERC721Enumerable, Ownable {
     struct Parcel {
-        string coordinates; // OpenStreetMap coordinates
-        string buildingId; // OpenStreetMap building ID
-        uint256 area; // Area in square meters
+        uint256 osmId;
     }
 
     mapping(uint256 => Parcel) public parcels;
-    uint256 private _tokenIdCounter;
 
     constructor() ERC721("Urban Game Theory Parcel", "UGTP") Ownable(msg.sender) {}
 
-    function mint(address to, string memory coordinates, string memory buildingId, uint256 area)
-        public
-        onlyOwner
-        returns (uint256)
-    {
-        uint256 tokenId = _tokenIdCounter;
-        _tokenIdCounter++;
+    function mint(address to, uint256 osmId) public returns (uint256) {
+        if (_ownerOf(osmId) != address(0)) {
+            revert("ParcelNFT: Token ID already minted");
+        }
 
-        _safeMint(to, tokenId);
-        parcels[tokenId] = Parcel(coordinates, buildingId, area);
+        _safeMint(to, osmId);
+        parcels[osmId] = Parcel(osmId);
 
-        return tokenId;
+        return osmId;
     }
 
     function getParcel(uint256 tokenId) public view returns (Parcel memory) {
-        require(_ownerOf(tokenId) != address(0), "ParcelNFT: Parcel does not exist");
+        if (_ownerOf(tokenId) == address(0)) {
+            revert("ParcelNFT: Parcel does not exist");
+        }
         return parcels[tokenId];
+    }
+
+    // Override functions to handle ERC721Enumerable
+    function _update(address to, uint256 tokenId, address auth)
+        internal
+        virtual
+        override(ERC721Enumerable)
+        returns (address)
+    {
+        return super._update(to, tokenId, auth);
+    }
+
+    function _increaseBalance(address account, uint128 amount) internal virtual override(ERC721Enumerable) {
+        super._increaseBalance(account, amount);
+    }
+
+    function supportsInterface(bytes4 interfaceId) public view virtual override(ERC721Enumerable) returns (bool) {
+        return super.supportsInterface(interfaceId);
     }
 }

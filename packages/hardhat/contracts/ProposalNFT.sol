@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./ParcelNFT.sol";
 
-contract ProposalNFT is ERC721, Ownable {
+contract ProposalNFT is ERC721Enumerable, Ownable {
     struct Proposal {
         string[] parcelIds;
         bool isConditional;
@@ -45,5 +45,14 @@ contract ProposalNFT is ERC721, Ownable {
         require(_ownerOf(tokenId) != address(0), "ProposalNFT: Proposal does not exist");
         require(msg.sender == ownerOf(tokenId), "ProposalNFT: Not the owner");
         proposals[tokenId].isActive = active;
+    }
+
+    function tokenURI(uint256 tokenId) public view virtual override returns (string memory) {
+        require(_ownerOf(tokenId) != address(0), "ProposalNFT: URI query for nonexistent token");
+        return proposals[tokenId].imageURI;
+    }
+
+    function supportsInterface(bytes4 interfaceId) public view virtual override(ERC721Enumerable) returns (bool) {
+        return super.supportsInterface(interfaceId);
     }
 }
