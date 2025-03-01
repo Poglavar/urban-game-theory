@@ -20,6 +20,7 @@ contract ProposalNFT is ERC721Enumerable, Ownable {
 
     ParcelNFT public parcelNFT;
     IERC20 public cityToken;
+    IERC20 public usdcToken;
     mapping(uint256 => Proposal) public proposals;
     uint256 private _tokenIdCounter;
 
@@ -221,5 +222,26 @@ contract ProposalNFT is ERC721Enumerable, Ownable {
 
     function supportsInterface(bytes4 interfaceId) public view virtual override(ERC721Enumerable) returns (bool) {
         return super.supportsInterface(interfaceId);
+    }
+
+    function depositERC20(address tokenAddress, uint256 proposalId, uint256 amount) public {
+        require(_ownerOf(proposalId) != address(0), "ProposalNFT: Proposal does not exist");
+        require(proposals[proposalId].isActive, "ProposalNFT: Proposal is not active");
+        require(amount > 0, "ProposalNFT: Amount must be greater than 0");
+        require(
+            IERC20(tokenAddress).allowance(msg.sender, address(this)) >= amount,
+            "ProposalNFT: USDC allowance insufficient"
+        );
+
+        require(
+            IERC20(tokenAddress).transferFrom(msg.sender, address(this), amount), "ProposalNFT: USDC transfer failed"
+        );
+
+        // Convert USDC (6 decimals) to ETH equivalent (18 decimals)
+        // Assuming 1 USDC = 1 USD and using current ETH price
+        uint256 ethEquivalent = (amount * 1e18) / (2500 * 1e6); // Assuming 1 ETH = $2500 USD
+        proposals[proposalId].ethBalance += ethEquivalent;
+
+        emit FundsDeposited(proposalId, ethEquivalent, 0);
     }
 }

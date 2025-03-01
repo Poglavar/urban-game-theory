@@ -15,12 +15,9 @@ const CENTER_LON = 15.962169;
 const ZOOM = 17;
 // read the PARCEL_NFT_ADDRESS from the .env.parcelNFT.address file in the parent directory
 const PARCEL_NFT_ADDRESS = fs.readFileSync('../.env.parcelNFT.address', 'utf8');
-const PRIVATE_KEY = process.env.ACCOUNT_0_PRIVATE_KEY;
-const RPC_URL = process.env.HARDHAT_RPC_URL;
-
-// Etherscan base URL for Sepolia network
-// const BLOCKEXPLORER_URL = "https://sepolia.etherscan.io/tx/";
-const BLOCKEXPLORER_URL = process.env.BLOCK_EXPLORER_URL;
+const PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY;
+const RPC_URL = process.env.RPC_URL;
+const BLOCK_EXPLORER_URL = process.env.BLOCK_EXPLORER_URL;
 
 // Calculate bounding box for the given zoom level
 function calculateBoundingBox(centerLat, centerLon, zoom) {
@@ -104,7 +101,7 @@ async function mintParcelNFTs(buildings) {
             console.log(`Minting to: ${to}`);
             // Mint the NFT
             const tx = await contract.mint(to, osmId);
-            console.log(`Transaction submitted: ${BLOCKEXPLORER_URL}${tx.hash}`);
+            console.log(`Transaction submitted: ${BLOCK_EXPLORER_URL}${tx.hash}`);
 
             // Wait for confirmation
             const receipt = await tx.wait();

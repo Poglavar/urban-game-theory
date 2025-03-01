@@ -27,6 +27,7 @@ Features by priority:
 - add your share to the card 
 - add functionality what happens when all have accepted. Some animation. Funds are distributed to the wallets of the parcel owners. Proposal set to Completed. Ownership of parcels is transferred to Proposal owner.
 - Q: can this be gamified into a monopoly-like game? Where people strategically purchase parcels so they unlock higher building ratios, which airdrops them more meme tokens?
+- deploy contracts to Base Sepolia
 
 Uploaded image example:
 https://ipfs.io/ipfs/QmUQw24iZPaJmijwyesv7D8AC46gifymTdqJ9eiepEpqw2
@@ -44,3 +45,6 @@ https://ipfs.io/ipfs/QmUQw24iZPaJmijwyesv7D8AC46gifymTdqJ9eiepEpqw2
   - Link to Coingecko
   - Number of Transactions in past year
   - Amount burned
+
+
+  - Donation modal. When user clicks on Donate to budger a modal should pop up. It should have this text "You can donate ETH, USDC, RLUSD or Cash via Credit Card to the proposal. All the funds will be distributed to the parcel owners once they all accept. Prior to that you can withdraw your donation any time". Below the text should be adropdown to choose the currency and a numbers-only input box to enter the amount. If USDC or RLUSD are chosen, the function depositERC20(tokenAddress, proposalId, amount) should be called on the ProposalNFT smart contract. Prior to that approve() should be called on the respective ERC20 contract. The addresses of the ERC20 contracts are in the .env file.
