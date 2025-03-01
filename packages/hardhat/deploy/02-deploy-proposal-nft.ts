@@ -7,10 +7,11 @@ const deployProposalNFT: DeployFunction = async function (hre: HardhatRuntimeEnv
 
   // Get the deployed ParcelNFT contract
   const parcelNFT = await get("ParcelNFT");
+  const cityToken = await get("CityMemeToken");
 
   const proposalNFT = await deploy("ProposalNFT", {
     from: deployer,
-    args: [parcelNFT.address],
+    args: [parcelNFT.address, cityToken.address],
     log: true,
     autoMine: true,
   });
@@ -20,4 +21,4 @@ const deployProposalNFT: DeployFunction = async function (hre: HardhatRuntimeEnv
 
 export default deployProposalNFT;
 deployProposalNFT.tags = ["ProposalNFT"];
-deployProposalNFT.dependencies = ["ParcelNFT"]; 
+deployProposalNFT.dependencies = ["ParcelNFT", "CityMemeToken"]; 

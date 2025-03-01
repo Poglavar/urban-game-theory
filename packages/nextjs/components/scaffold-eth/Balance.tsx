@@ -5,11 +5,51 @@ import { useDisplayUsdMode } from "~~/hooks/scaffold-eth/useDisplayUsdMode";
 import { useTargetNetwork } from "~~/hooks/scaffold-eth/useTargetNetwork";
 import { useWatchBalance } from "~~/hooks/scaffold-eth/useWatchBalance";
 import { useGlobalState } from "~~/services/store/store";
+import { useScaffoldContract } from "~~/hooks/scaffold-eth/useScaffoldContract";
+import { useEffect, useState } from "react";
 
 type BalanceProps = {
   address?: Address;
   className?: string;
   usdMode?: boolean;
+};
+
+const TokenBalance = ({ address }: { address?: Address }) => {
+  const [balance, setBalance] = useState<bigint | null>(null);
+  const { data: memeTokenContract } = useScaffoldContract({
+    contractName: "CityMemeToken",
+  });
+
+  useEffect(() => {
+    const fetchBalance = async () => {
+      if (!memeTokenContract || !address) return;
+      try {
+        const result = await memeTokenContract.read.balanceOf([address]);
+        setBalance(result);
+      } catch (error) {
+        console.error("Error fetching token balance:", error);
+        setBalance(null);
+      }
+    };
+
+    fetchBalance();
+    // Poll every 10 seconds for updates
+    const interval = setInterval(fetchBalance, 10000);
+    return () => clearInterval(interval);
+  }, [memeTokenContract, address]);
+
+  if (!address || balance === null) {
+    return null;
+  }
+
+  const formattedBalance = Number(formatEther(balance)).toFixed(0);
+
+  return (
+    <div className="flex items-center ml-1 text-sm">
+      <span>{formattedBalance}</span>
+      <span className="text-[0.8em] font-bold ml-1">ZAGREB</span>
+    </div>
+  );
 };
 
 /**
@@ -52,24 +92,28 @@ export const Balance = ({ address, className = "", usdMode }: BalanceProps) => {
   const formattedBalance = balance ? Number(formatEther(balance.value)) : 0;
 
   return (
-    <button
-      className={`btn btn-sm btn-ghost flex flex-col font-normal items-center hover:bg-transparent ${className}`}
-      onClick={toggleDisplayUsdMode}
-      type="button"
-    >
-      <div className="w-full flex items-center justify-center">
-        {displayUsdMode ? (
-          <>
-            <span className="text-[0.8em] font-bold mr-1">$</span>
-            <span>{(formattedBalance * nativeCurrencyPrice).toFixed(2)}</span>
-          </>
-        ) : (
-          <>
-            <span>{formattedBalance.toFixed(4)}</span>
-            <span className="text-[0.8em] font-bold ml-1">{targetNetwork.nativeCurrency.symbol}</span>
-          </>
-        )}
-      </div>
-    </button>
+    <div className="flex items-center gap-1">
+      <button
+        className={`btn btn-sm btn-ghost flex flex-col font-normal items-center hover:bg-transparent ${className}`}
+        onClick={toggleDisplayUsdMode}
+        type="button"
+      >
+        <div className="w-full flex items-center justify-center">
+          {displayUsdMode ? (
+            <>
+              <span className="text-[0.8em] font-bold mr-1">$</span>
+              <span>{(formattedBalance * nativeCurrencyPrice).toFixed(2)}</span>
+            </>
+          ) : (
+            <>
+              <span>{formattedBalance.toFixed(4)}</span>
+              <span className="text-[0.8em] font-bold ml-1">{targetNetwork.nativeCurrency.symbol}</span>
+            </>
+          )}
+        </div>
+      </button>
+      <div className="border-l border-base-300 h-6"></div>
+      <TokenBalance address={address} />
+    </div>
   );
 };

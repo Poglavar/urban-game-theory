@@ -1,5 +1,6 @@
 const { ethers } = require('ethers');
 const fetch = require('node-fetch');
+const fs = require('fs');
 // load .env file from parent directory
 require('dotenv').config({ path: '../.env' });
 
@@ -12,7 +13,8 @@ const PARCEL_NFT_ABI = [
 const CENTER_LAT = 45.760772;
 const CENTER_LON = 15.962169;
 const ZOOM = 17;
-const PARCEL_NFT_ADDRESS = process.env.PARCEL_NFT_ADDRESS;
+// read the PARCEL_NFT_ADDRESS from the .env.parcelNFT.address file in the parent directory
+const PARCEL_NFT_ADDRESS = fs.readFileSync('../.env.parcelNFT.address', 'utf8');
 const PRIVATE_KEY = process.env.ACCOUNT_0_PRIVATE_KEY;
 const RPC_URL = process.env.HARDHAT_RPC_URL;
 
@@ -131,6 +133,7 @@ async function main() {
     try {
         console.log("\n🏗️  Urban Game Theory - Parcel NFT Minter");
         console.log("----------------------------------------");
+        console.log(`PARCEL_NFT_ADDRESS: ${PARCEL_NFT_ADDRESS}`);
 
         console.log("Calculating bounding box...");
         const bounds = calculateBoundingBox(CENTER_LAT, CENTER_LON, ZOOM);

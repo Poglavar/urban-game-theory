@@ -1,17 +1,20 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, useContext } from "react";
-import { useAccount, useWalletClient } from "wagmi";
+import { useAccount } from "wagmi";
+import { useWalletClient } from "wagmi";
 import { RainbowKitCustomConnectButton } from "~~/components/scaffold-eth";
 import { useScaffoldWriteContract } from "~~/hooks/scaffold-eth/useScaffoldWriteContract";
 import { useScaffoldContract } from "~~/hooks/scaffold-eth/useScaffoldContract";
 import { useScaffoldReadContract } from "~~/hooks/scaffold-eth/useScaffoldReadContract";
+import { useScaffoldContractWrite } from "~~/hooks/scaffold-eth/useScaffoldContractWrite";
 import MapView from "~~/components/map/MapView";
 import type { Parcel } from "~~/types/parcel";
 import { toPng } from "html-to-image";
 import { notification } from "~~/utils/scaffold-eth";
 import type { Contract } from "~~/utils/scaffold-eth/contract";
 import React from "react";
+import { formatEther, parseEther, parseUnits } from "viem";
 
 // Extend Window interface to include analyzeArea
 declare global {
@@ -48,9 +51,12 @@ interface ProposalMetadata {
 }
 
 interface ProposalData {
-  tokenId: number;
+  tokenId: bigint;
   metadata: ProposalMetadata;
   parcelIds: string[];
+  ethAmount: bigint;
+  tokenAmount: bigint;
+  acceptanceCount: number;
 }
 
 interface ProposalResponse {
@@ -203,34 +209,125 @@ const BuildingDetailsTooltip = ({ buildingDetails }: { buildingDetails: Building
 };
 
 // Update the ListPanel component
-const ListPanel = React.memo(({ onParcelSelect }: { onParcelSelect?: (parcelId: string | null, buildingDetails: BuildingDetails | null) => void }) => {
-  const { selectedParcels, activeTab, setActiveTab, parcelOwners, parcelNFTContract, setParcelOwners, setHighlightedParcelIds } = useContext(AppContext);
+const ListPanel = React.memo(({ onParcelSelect, proposals, selectedMyParcel }: {
+  onParcelSelect?: (parcelId: string | null, buildingDetails: BuildingDetails | null) => void;
+  proposals: ProposalData[];
+  selectedMyParcel: string | null;
+}) => {
+  const { selectedParcels, activeTab, setActiveTab, parcelOwners, parcelNFTContract, setParcelOwners, setHighlightedParcelIds, setFilteredProposals, setSelectedMyParcel } = useContext(AppContext);
   const { address } = useAccount();
   const [ownedParcels, setOwnedParcels] = useState<OwnedParcel[]>([]);
   const [isLoadingOwned, setIsLoadingOwned] = useState(false);
   const [hasLoadedParcels, setHasLoadedParcels] = useState(false);
+  const [lastLoadedAddress, setLastLoadedAddress] = useState<string | undefined>();
+
+  const fetchParcelOwner = useCallback(async (parcelId: string) => {
+    if (!parcelNFTContract) {
+      console.error('ParcelNFT contract not initialized');
+      return;
+    }
+
+    try {
+      const owner = await parcelNFTContract.read.ownerOf([BigInt(parcelId)]);
+      console.log('Owner found for parcel', parcelId, ':', owner);
+      setParcelOwners(prev => ({ ...prev, [parcelId]: owner }));
+    } catch (error: any) {
+      if (error.message && (
+        error.message.includes("ERC721Nonexistent") ||
+        error.message.includes("nonexistent token") ||
+        error.message.includes("ownerOf reverted")
+      )) {
+        console.log('Parcel', parcelId, 'is not minted yet');
+        setParcelOwners(prev => ({ ...prev, [parcelId]: "Not minted" }));
+      } else {
+        console.error('Error checking ownership for parcel', parcelId, ':', error);
+        setParcelOwners(prev => ({ ...prev, [parcelId]: "Error checking ownership" }));
+      }
+    }
+  }, [parcelNFTContract, setParcelOwners]);
+
+  // Effect to fetch owners for selected parcels
+  useEffect(() => {
+    if (activeTab === "selected" && selectedParcels.length > 0 && parcelNFTContract) {
+      selectedParcels.forEach(parcel => {
+        if (!parcelOwners[parcel.id]) {
+          fetchParcelOwner(parcel.id);
+        }
+      });
+    }
+  }, [activeTab, selectedParcels, parcelNFTContract, parcelOwners, fetchParcelOwner]);
 
   const handleParcelClick = useCallback((parcelId: string) => {
-    setHighlightedParcelIds([parcelId]);
-  }, [setHighlightedParcelIds]);
+    if (activeTab === "my") {
+      // For My Parcels tab, toggle the selectedMyParcel and update filtered proposals
+      setSelectedMyParcel(prevSelected => {
+        const newSelected = prevSelected === parcelId ? null : parcelId;
+        // Only update filtered proposals if there's a change in selection
+        if (prevSelected !== newSelected) {
+          if (newSelected) {
+            const filtered = proposals.filter(proposal => proposal.parcelIds.includes(parcelId));
+            setFilteredProposals(filtered.length > 0 ? filtered : []);
+          } else {
+            setFilteredProposals([]);
+          }
+        }
+        return newSelected;
+      });
+
+      // Update highlighted parcels only if in "my" tab
+      setHighlightedParcelIds([parcelId]);
+    } else {
+      // For Selected tab, find the parcel in ownedParcels to get its details
+      const parcel = ownedParcels.find(p => p.id === parcelId);
+      if (parcel) {
+        onParcelSelect?.(parcelId, {
+          id: parcel.id,
+          area: 0,
+          center: { lat: 0, lon: 0 },
+          tags: {},
+          geometry: []
+        });
+      }
+
+      // Filter proposals for this parcel
+      const filtered = proposals.filter(proposal => proposal.parcelIds.includes(parcelId));
+      setFilteredProposals(filtered);
+    }
+  }, [activeTab, ownedParcels, onParcelSelect, proposals, setFilteredProposals, setHighlightedParcelIds, setSelectedMyParcel]);
 
   // Fetch owned parcels only when necessary
   useEffect(() => {
-    const shouldFetchParcels = !hasLoadedParcels &&
+    const shouldFetchParcels =
       activeTab === "my" &&
       parcelNFTContract &&
-      address;
+      address &&
+      (!hasLoadedParcels || lastLoadedAddress !== address);
 
     const fetchOwnedParcels = async () => {
-      if (!shouldFetchParcels) return;
+      if (!shouldFetchParcels) {
+        console.log('Skipping parcel fetch because:', {
+          activeTab,
+          hasContract: !!parcelNFTContract,
+          hasAddress: !!address,
+          hasLoadedParcels,
+          lastLoadedAddress,
+          currentAddress: address
+        });
+        return;
+      }
 
       setIsLoadingOwned(true);
       try {
-        console.log('Fetching owned parcels for address:', address);
+        console.log('Starting to fetch owned parcels for address:', address);
+        console.log('Using ParcelNFT contract:', parcelNFTContract);
+
+        if (!parcelNFTContract) {
+          throw new Error('ParcelNFT contract is not initialized');
+        }
 
         // Get the number of parcels owned by the address
         const balance = await parcelNFTContract.read.balanceOf([address]);
-        console.log('Balance:', balance);
+        console.log('Balance of owned parcels:', balance.toString());
 
         const owned: OwnedParcel[] = [];
         // Iterate through each owned token
@@ -238,36 +335,60 @@ const ListPanel = React.memo(({ onParcelSelect }: { onParcelSelect?: (parcelId: 
           try {
             // Get token ID at index i for the owner
             const tokenId = await parcelNFTContract.read.tokenOfOwnerByIndex([address, BigInt(i)]);
-            console.log(`Token ${i}:`, tokenId);
+            console.log(`Found token ${i}:`, tokenId.toString());
 
             // Get parcel details
             const parcel = await parcelNFTContract.read.getParcel([tokenId]);
+            console.log(`Parcel details for token ${tokenId}:`, parcel);
+
             owned.push({
               id: tokenId.toString(),
               owner: address,
               osmId: parcel.osmId.toString()
             } as OwnedParcel);
+            console.log(`Successfully added parcel ${tokenId} to owned list`);
           } catch (error) {
-            console.error('Error fetching token:', error);
+            console.error(`Error fetching token at index ${i}:`, error);
+            if (error instanceof Error) {
+              console.error('Error details:', {
+                message: error.message,
+                stack: error.stack
+              });
+            }
           }
         }
 
+        console.log('Final list of owned parcels:', owned);
         setOwnedParcels(owned);
         setHasLoadedParcels(true);
+        setLastLoadedAddress(address);
       } catch (error) {
-        console.error('Error fetching owned parcels:', error);
+        console.error('Error in fetchOwnedParcels:', error);
+        if (error instanceof Error) {
+          console.error('Error details:', {
+            message: error.message,
+            stack: error.stack
+          });
+        }
+        // Reset state on error
+        setOwnedParcels([]);
+        setHasLoadedParcels(false);
+        setLastLoadedAddress(undefined);
       } finally {
         setIsLoadingOwned(false);
       }
     };
 
     fetchOwnedParcels();
-  }, [parcelNFTContract, address, activeTab, hasLoadedParcels]);
+  }, [parcelNFTContract, address, activeTab, hasLoadedParcels, lastLoadedAddress]);
 
   // Reset loaded state when address changes
   useEffect(() => {
-    setHasLoadedParcels(false);
-  }, [address]);
+    if (lastLoadedAddress !== address) {
+      setHasLoadedParcels(false);
+      setLastLoadedAddress(undefined);
+    }
+  }, [address, lastLoadedAddress]);
 
   // Render owned parcels list
   const renderOwnedParcels = useCallback(() => {
@@ -297,21 +418,34 @@ const ListPanel = React.memo(({ onParcelSelect }: { onParcelSelect?: (parcelId: 
       );
     }
 
-    return ownedParcels.map((parcel) => (
+    // Create array of parcels with their proposal counts
+    const parcelsWithCounts = ownedParcels.map(parcel => ({
+      parcel,
+      proposalCount: proposals.filter(proposal => proposal.parcelIds.includes(parcel.id)).length
+    }));
+
+    // Sort by proposal count in descending order
+    parcelsWithCounts.sort((a, b) => b.proposalCount - a.proposalCount);
+
+    return parcelsWithCounts.map(({ parcel, proposalCount }) => (
       <div
         key={parcel.id}
-        className="bg-base-200 p-4 rounded-lg cursor-pointer hover:bg-base-300 transition-colors"
+        className={`bg-base-200 p-4 rounded-lg cursor-pointer hover:bg-base-300 transition-colors ${selectedMyParcel === parcel.id ? 'border-2 border-primary' : ''
+          }`}
         onClick={() => handleParcelClick(parcel.id)}
       >
-        <h3 className="text-xl font-semibold mb-2">Parcel</h3>
-        <p className="text-sm">ID: {parcel.id}</p>
-        <p className="text-sm">OSM ID: {parcel.osmId}</p>
+        <div className="flex justify-between items-start">
+          <h3 className="text-xl font-semibold mb-2">Parcel {parcel.id}</h3>
+          <div className="badge badge-accent badge-lg gap-1">
+            {proposalCount} Proposals
+          </div>
+        </div>
         <p className="text-sm text-base-content/70 mt-1">
           Owner: <span className="font-mono">{parcel.owner}</span>
         </p>
       </div>
     ));
-  }, [address, isLoadingOwned, ownedParcels, handleParcelClick]);
+  }, [address, isLoadingOwned, ownedParcels, handleParcelClick, proposals, selectedMyParcel]);
 
   // Render selected parcels list
   const renderSelectedParcels = useCallback(() => {
@@ -381,6 +515,8 @@ const ListPanel = React.memo(({ onParcelSelect }: { onParcelSelect?: (parcelId: 
 // Create AppContext
 const AppContext = React.createContext<{
   selectedParcels: SelectedParcel[];
+  selectedMyParcel: string | null;
+  setSelectedMyParcel: React.Dispatch<React.SetStateAction<string | null>>;
   activeTab: string;
   setActiveTab: (tab: string) => void;
   parcelOwners: Record<string, string>;
@@ -390,8 +526,11 @@ const AppContext = React.createContext<{
   setShowProposalModal: (show: boolean) => void;
   highlightedParcelIds: string[];
   setHighlightedParcelIds: (ids: string[]) => void;
+  setFilteredProposals: React.Dispatch<React.SetStateAction<ProposalData[]>>;
 }>({
   selectedParcels: [],
+  selectedMyParcel: null,
+  setSelectedMyParcel: () => { },
   activeTab: "my",
   setActiveTab: () => { },
   parcelOwners: {},
@@ -401,52 +540,202 @@ const AppContext = React.createContext<{
   setShowProposalModal: () => { },
   highlightedParcelIds: [],
   setHighlightedParcelIds: () => { },
+  setFilteredProposals: () => { },
 });
 
 // Update ProposalsPanel to be memoized
-const ProposalsPanel = React.memo(({ proposals, loadAllProposals }: { proposals: ProposalData[]; loadAllProposals: () => Promise<void> }) => {
-  const { selectedParcels, setShowProposalModal, setHighlightedParcelIds } = useContext(AppContext);
+const ProposalsPanel = React.memo(({ proposals, loadAllProposals, nativeCurrencyPrice }: {
+  proposals: ProposalData[];
+  loadAllProposals: () => Promise<void>;
+  nativeCurrencyPrice?: number;
+}) => {
+  const { selectedMyParcel, setHighlightedParcelIds, activeTab } = useContext(AppContext);
+  const [acceptedProposals, setAcceptedProposals] = useState<Record<string, boolean>>({});
+  const [isCheckingAcceptance, setIsCheckingAcceptance] = useState(false);
+  const { writeContractAsync: writeProposalNFT } = useScaffoldWriteContract({
+    contractName: "ProposalNFT",
+  });
+  const { data: proposalNFTContract } = useScaffoldContract({
+    contractName: "ProposalNFT",
+  }) as { data: Contract<any> | null };
+
+  // Check acceptance status only when dependencies change
+  useEffect(() => {
+    const checkAcceptance = async () => {
+      if (!proposalNFTContract || !selectedMyParcel || isCheckingAcceptance) {
+        return;
+      }
+
+      setIsCheckingAcceptance(true);
+      try {
+        const newAcceptedProposals: Record<string, boolean> = {};
+
+        // Process proposals in batches to avoid overwhelming the network
+        for (const proposal of proposals) {
+          try {
+            const result = await proposalNFTContract.read.hasAccepted([proposal.tokenId, selectedMyParcel]);
+            newAcceptedProposals[proposal.tokenId.toString()] = result;
+          } catch (error) {
+            console.error("Error checking acceptance for proposal", proposal.tokenId.toString(), error);
+            newAcceptedProposals[proposal.tokenId.toString()] = false;
+          }
+        }
+
+        setAcceptedProposals(newAcceptedProposals);
+      } catch (error) {
+        console.error("Error checking proposal acceptance:", error);
+      } finally {
+        setIsCheckingAcceptance(false);
+      }
+    };
+
+    checkAcceptance();
+  }, [proposalNFTContract, selectedMyParcel, proposals]);
+
+  // Reset accepted proposals when selectedMyParcel changes
+  useEffect(() => {
+    if (!selectedMyParcel) {
+      setAcceptedProposals({});
+    }
+  }, [selectedMyParcel]);
+
+  const calculateBudget = (ethAmount: bigint, tokenAmount: bigint) => {
+    const ethValue = Number(ethAmount) / 1e18 * (nativeCurrencyPrice || 0);
+    const tokenValue = Number(tokenAmount) / 1e18 * 0.008; // Hardcoded city token price
+    return ethValue + tokenValue;
+  };
 
   const handleProposalClick = (proposal: ProposalData) => {
     // Highlight all parcels in the proposal
     setHighlightedParcelIds(proposal.parcelIds);
   };
 
+  const handleAcceptProposal = async (proposalId: bigint, parcelId: string | null) => {
+    if (!parcelId) {
+      notification.error("No parcel selected");
+      return;
+    }
+
+    try {
+      notification.info("Accepting proposal...");
+      console.log("Accepting proposal with ID:", proposalId.toString(), "and parcel:", parcelId);
+
+      const txHash = await writeProposalNFT({
+        functionName: "acceptProposal",
+        args: [proposalId, parcelId],
+      });
+
+      notification.info("Waiting for transaction confirmation...");
+      await txHash;
+      notification.success("Proposal accepted successfully!");
+
+      // Reload proposals to update acceptance count
+      await loadAllProposals();
+    } catch (error) {
+      console.error("Error accepting proposal:", error);
+      notification.error(error instanceof Error ? error.message : "Failed to accept proposal");
+    }
+  };
+
+  // Sort proposals by budget
+  const sortedProposals = [...proposals].sort((a, b) => {
+    const budgetA = calculateBudget(a.ethAmount, a.tokenAmount);
+    const budgetB = calculateBudget(b.ethAmount, b.tokenAmount);
+    return budgetB - budgetA;
+  });
+
+  // Function to check if a proposal can be accepted by the selected parcel
+  const canAcceptProposal = (proposal: ProposalData) => {
+    // Add debug logging
+    console.log('Checking if can accept proposal:', {
+      proposalId: proposal.tokenId,
+      activeTab,
+      hasSelectedMyParcel: !!selectedMyParcel,
+      selectedMyParcel,
+      proposalParcelIds: proposal.parcelIds,
+      wouldIncludeSelectedParcel: selectedMyParcel ? proposal.parcelIds.includes(selectedMyParcel) : false
+    });
+
+    // Only show accept button if:
+    // 1. We're in the "my" tab
+    // 2. There is a selected parcel from My Parcels
+    // 3. The proposal includes the selected parcel
+    // 4. The parcel hasn't already accepted this proposal
+    return activeTab === "my" &&
+      !!selectedMyParcel &&
+      proposal.parcelIds.includes(selectedMyParcel);
+  };
+
   return (
     <div className="p-4">
       <h2 className="text-2xl font-bold mb-4">Proposals</h2>
       <div className="space-y-4">
-        {proposals.length > 0 ? (
+        {sortedProposals.length > 0 ? (
           <div className="grid grid-cols-1 gap-4">
-            {proposals.map((proposal) => (
+            {sortedProposals.map((proposal) => (
               <div
-                key={proposal.tokenId}
+                key={proposal.tokenId.toString()}
                 className="card bg-base-100 shadow-xl cursor-pointer hover:bg-opacity-70 transition-colors"
                 onClick={() => handleProposalClick(proposal)}
               >
-                <div className="card-body">
-                  <div className="flex justify-between items-start">
-                    <h3 className="card-title text-lg">{proposal.metadata.name}</h3>
-                    <span className="badge badge-accent">{proposal.metadata.type}</span>
+                <div className="card-body p-4">
+                  <div className="flex items-start justify-between gap-2 mb-0.5">
+                    <div className="flex items-center gap-2">
+                      <h3 className="card-title text-lg">{proposal.metadata.name}</h3>
+                      <span className={`badge ${proposal.metadata.type === "Road" ? "bg-amber-200 text-amber-800 border-amber-300" :
+                        proposal.metadata.type === "Park" ? "bg-emerald-200 text-emerald-800 border-emerald-300" :
+                          proposal.metadata.type === "Square" ? "bg-slate-100 text-slate-800 border-slate-200" :
+                            proposal.metadata.type === "Buildings" ? "bg-zinc-300 text-zinc-800 border-zinc-400" :
+                              "badge-accent"
+                        }`}>{proposal.metadata.type}</span>
+                    </div>
+                    <div className="badge badge-lg bg-success/10 text-success border-success/20">
+                      ${calculateBudget(proposal.ethAmount, proposal.tokenAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
                   </div>
-                  <p className="text-sm text-base-content/70 mt-2">{proposal.metadata.description}</p>
-                  <div className="mt-4 space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span>Parcels Involved:</span>
+                  <p className="text-sm text-base-content/70 mb-2">{proposal.metadata.description}</p>
+                  <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm">
+                    <div className="flex gap-2">
+                      <span className="text-base-content/70">Parcels:</span>
                       <span className="font-medium">{proposal.parcelIds.length}</span>
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <span>Status:</span>
+                    <div className="flex gap-2">
+                      <span className="text-base-content/70">Accepted:</span>
+                      <span className="font-medium">{proposal.acceptanceCount || 0}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <span className="text-base-content/70">Status:</span>
                       <span className="text-success">Active</span>
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <span>Conditional:</span>
+                    <div className="flex gap-2">
+                      <span className="text-base-content/70">Conditional:</span>
                       <span>{proposal.metadata.attributes.find(attr => attr.trait_type === "Conditional")?.value || "No"}</span>
                     </div>
+                    <div className="flex gap-2">
+                      <span className="text-base-content/70">Share Upside:</span>
+                      <span>{proposal.metadata.attributes.find(attr => attr.trait_type === "Share Upside")?.value || "No"}</span>
+                    </div>
                   </div>
-                  <div className="card-actions justify-end mt-4">
-                    <button className="btn btn-sm btn-primary">View Details</button>
-                  </div>
+                  {canAcceptProposal(proposal) && (
+                    <div className="mt-4 flex justify-end" onClick={(e) => e.stopPropagation()}>
+                      {acceptedProposals[proposal.tokenId.toString()] ? (
+                        <div className="badge badge-success gap-2 p-4">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="inline-block w-4 h-4 stroke-current"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
+                          Accepted
+                        </div>
+                      ) : (
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAcceptProposal(proposal.tokenId, selectedMyParcel);
+                          }}
+                        >
+                          Accept Proposal
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -465,6 +754,7 @@ export default function Home() {
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
   const [selectedParcels, setSelectedParcels] = useState<SelectedParcel[]>([]);
+  const [selectedMyParcel, setSelectedMyParcel] = useState<string | null>(null);
   const [isAnalyzingParcels, setIsAnalyzingParcels] = useState(false);
   const [showProposalModal, setShowProposalModal] = useState(false);
   const [showMemeTokenModal, setShowMemeTokenModal] = useState(false);
@@ -476,6 +766,7 @@ export default function Home() {
   const [isLoadingMemeData, setIsLoadingMemeData] = useState(false);
   const [highlightedParcelIds, setHighlightedParcelIds] = useState<string[]>([]);
   const [proposals, setProposals] = useState<ProposalData[]>([]);
+  const [filteredProposals, setFilteredProposals] = useState<ProposalData[]>([]);
 
   const { writeContractAsync: writeProposalNFT } = useScaffoldWriteContract({
     contractName: "ProposalNFT",
@@ -530,71 +821,18 @@ export default function Home() {
     walletClient: walletClient,
   }) as { data: Contract<any> | null };
 
-  // Update the fetchParcelOwner function with proper typing
-  const fetchParcelOwner = async (parcelId: string) => {
-    if (!parcelNFTContract) {
-      console.error('ParcelNFT contract not initialized:', {
-        hasContract: !!parcelNFTContract,
-        isLoading: isParcelNFTLoading
-      });
-      return;
-    }
-
-    try {
-      console.log('Attempting to check ownership for parcel:', {
-        parcelId,
-        contractAddress: parcelNFTContract.target,
-        contractMethods: Object.keys(parcelNFTContract),
-        contractFunctions: Object.getOwnPropertyNames(Object.getPrototypeOf(parcelNFTContract))
-      });
-
-      const owner = await parcelNFTContract.read.ownerOf([BigInt(parcelId)]);
-      console.log('Owner found for parcel', parcelId, ':', owner);
-      setParcelOwners(prev => ({ ...prev, [parcelId]: owner }));
-    } catch (error: any) {
-      // Check if the error is due to non-existent token
-      if (error.message && (
-        error.message.includes("ERC721Nonexistent") ||
-        error.message.includes("nonexistent token") ||
-        error.message.includes("ownerOf reverted")
-      )) {
-        console.log('Parcel', parcelId, 'is not minted yet');
-        setParcelOwners(prev => ({ ...prev, [parcelId]: "Not minted" }));
-      } else {
-        console.error('Error checking ownership for parcel', parcelId, ':', {
-          error,
-          errorMessage: error instanceof Error ? error.message : 'Unknown error',
-          contractAddress: parcelNFTContract.target
-        });
-        setParcelOwners(prev => ({ ...prev, [parcelId]: "Error checking ownership" }));
-      }
-    }
-  };
-
-  const handleParcelSelect = useCallback((parcelId: string | null, buildingDetails: BuildingDetails | null) => {
-    if (!parcelId) return;
-
-    setSelectedParcels(prevParcels => {
-      const existingParcelIndex = prevParcels.findIndex(p => p.id === parcelId);
-
-      if (existingParcelIndex >= 0) {
-        // Remove the parcel if it's already selected
-        return prevParcels.filter(p => p.id !== parcelId);
-      } else if (buildingDetails) {
-        // Add the parcel if it's not already selected and we have building details
-        setActiveTab("selected"); // Switch to selected tab when adding a parcel
-        return [...prevParcels, { id: parcelId, buildingDetails }];
-      }
-      return prevParcels;
-    });
-  }, []);
-
   // Update the loadAllProposals function to be memoized
   const loadAllProposals = useCallback(async () => {
     if (!proposalNFTContract) {
+      console.log('ProposalNFT contract not initialized:', proposalNFTContract);
       notification.error("Contract not initialized");
       return;
     }
+
+    console.log('Starting to load proposals with contract:', {
+      address: proposalNFTContract.address,
+      functions: Object.keys(proposalNFTContract.read || {})
+    });
 
     setIsLoadingProposals(true);
     try {
@@ -602,51 +840,74 @@ export default function Home() {
 
       // Get total number of proposals using ERC721Enumerable
       const totalSupply = await proposalNFTContract.read.totalSupply();
+      console.log('Total supply of proposals:', totalSupply.toString());
 
       // Load each proposal by index
       for (let i = 0; i < Number(totalSupply); i++) {
         try {
+          console.log(`Loading proposal ${i} of ${totalSupply}...`);
           // Get token ID at current index
           const tokenId = await proposalNFTContract.read.tokenByIndex([BigInt(i)]);
+          console.log(`Token ID at index ${i}:`, tokenId.toString());
 
           // Get proposal data
           const proposal = await proposalNFTContract.read.getProposal([tokenId]);
+          console.log(`Proposal data for token ${tokenId}:`, proposal);
 
           // Skip inactive proposals
-          if (!proposal || !proposal.isActive) {
+          if (!proposal || !proposal[3]) {  // index 3 is isActive in the array
+            console.log(`Skipping inactive proposal ${tokenId}`);
             continue;
           }
 
           // Get token URI
           const uri = await proposalNFTContract.read.tokenURI([tokenId]);
+          console.log(`Token URI for ${tokenId}:`, uri);
           if (!uri) {
+            console.log(`No URI for proposal ${tokenId}, skipping`);
             continue;
           }
 
           // Remove ipfs:// prefix if present
           const cleanUri = uri.replace("ipfs://", "");
+          console.log(`Fetching metadata from: https://gateway.pinata.cloud/ipfs/${cleanUri}`);
 
           // Fetch metadata from IPFS via Pinata gateway
           const metadataResponse = await fetch(`https://gateway.pinata.cloud/ipfs/${cleanUri}`);
           if (!metadataResponse.ok) {
-            console.warn(`Failed to fetch metadata for token ${tokenId}`);
+            console.warn(`Failed to fetch metadata for token ${tokenId}: ${metadataResponse.status} ${metadataResponse.statusText}`);
             continue;
           }
 
           const metadata = await metadataResponse.json();
+          console.log(`Metadata for token ${tokenId}:`, metadata);
+
           loadedProposals.push({
-            tokenId: Number(tokenId),
+            tokenId: tokenId,
             metadata,
-            parcelIds: [...proposal.parcelIds]
+            parcelIds: [...proposal[0]],
+            ethAmount: proposal[4],
+            tokenAmount: proposal[5],
+            acceptanceCount: proposal[6]
           });
+          console.log(`Successfully added proposal ${tokenId} to loaded proposals`);
 
         } catch (error) {
-          console.warn(`Error loading proposal at index ${i}:`, error);
+          console.error(`Error loading proposal at index ${i}:`, error);
+          if (error instanceof Error) {
+            console.error('Error details:', {
+              message: error.message,
+              stack: error.stack
+            });
+          }
           continue;
         }
       }
 
+      console.log('Final loaded proposals:', loadedProposals);
+
       if (loadedProposals.length === 0) {
+        console.log('No active proposals found');
         notification.warning("No active proposals found");
         return;
       }
@@ -656,11 +917,22 @@ export default function Home() {
 
     } catch (error) {
       console.error("Error loading proposals:", error);
+      if (error instanceof Error) {
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack
+        });
+      }
       notification.error(error instanceof Error ? error.message : "Failed to load proposals");
     } finally {
       setIsLoadingProposals(false);
     }
   }, [proposalNFTContract, setIsLoadingProposals, setProposals]);
+
+  // Add effect to clear filtered proposals when loading all proposals
+  useEffect(() => {
+    setFilteredProposals([]);
+  }, [proposals]);
 
   // Proposal Modal Component
   const ProposalModal = () => {
@@ -676,7 +948,13 @@ export default function Home() {
     const [imagePreviewUrl, setImagePreviewUrl] = useState<string>("");
     const mapRef = useRef(null);
 
-    const { writeContractAsync, isMining } = useScaffoldWriteContract({
+    // First, approve the CityToken if needed
+    const { writeContractAsync: approveCityToken } = useScaffoldWriteContract({
+      contractName: "CityMemeToken",
+    });
+
+    // Then use mintAndFund
+    const { writeContractAsync: writeProposalNFT } = useScaffoldWriteContract({
       contractName: "ProposalNFT",
     });
 
@@ -821,21 +1099,51 @@ export default function Home() {
         notification.info("Starting proposal creation...");
         const ipfsUrl = await uploadToIPFS();
 
+        const ethValue = ethAmount ? parseEther(ethAmount) : 0n;
+        const tokenValue = cityTokenAmount ? parseUnits(cityTokenAmount, 18) : 0n;
+
+        // If city tokens are being used, approve them first
+        if (tokenValue > 0n) {
+          notification.info("Approving City Tokens...");
+          const contractAddress = parcelNFTContract?.address;
+          console.log('ParcelNFT Contract Address:', contractAddress);
+          await approveCityToken({
+            functionName: "approve",
+            args: [
+              proposalNFTContract?.address,
+              tokenValue
+            ],
+          });
+        }
+
         notification.info("Minting NFT...");
         console.log("Minting with args:", {
           address,
           parcelIds: selectedParcels.map(parcel => parcel.id),
           isConditional,
-          ipfsUrl
+          ipfsUrl,
+          ethAmount: ethValue,
+          cityTokenAmount: tokenValue
         });
 
-        await writeContractAsync({
-          functionName: "mint",
-          args: [address, selectedParcels.map(parcel => parcel.id), isConditional, ipfsUrl],
+        await writeProposalNFT({
+          functionName: "mintAndFund",
+          args: [
+            address,
+            selectedParcels.map(parcel => parcel.id),
+            isConditional,
+            ipfsUrl,
+            ethValue,
+            tokenValue
+          ],
+          value: ethValue,
         });
 
         notification.success("Proposal created successfully!");
         setShowProposalModal(false);
+
+        // Reload proposals after successful mint
+        await loadAllProposals();
       } catch (error) {
         console.error("Error minting proposal:", error);
         notification.error(error instanceof Error ? error.message : "Failed to create proposal");
@@ -970,14 +1278,14 @@ export default function Home() {
               {!address && <RainbowKitCustomConnectButton />}
               {address && (
                 <button
-                  className={`btn btn-primary ${isLoading || isMining ? 'loading' : ''}`}
+                  className={`btn btn-primary ${isLoading ? 'loading' : ''}`}
                   onClick={() => {
                     console.log("Mint button clicked");
                     handleMint();
                   }}
-                  disabled={isLoading || isMining || selectedParcels.length === 0}
+                  disabled={isLoading || selectedParcels.length === 0}
                 >
-                  {isLoading || isMining ? 'Minting...' : 'Mint and Fund'}
+                  {isLoading ? 'Minting...' : 'Mint and Fund'}
                 </button>
               )}
               <button
@@ -1085,7 +1393,24 @@ export default function Home() {
     );
   };
 
-  // Add callback handlers for ControlsPanel
+  const handleParcelSelect = useCallback((parcelId: string | null, buildingDetails: BuildingDetails | null) => {
+    if (!parcelId) return;
+
+    setSelectedParcels(prevParcels => {
+      const existingParcelIndex = prevParcels.findIndex(p => p.id === parcelId);
+
+      if (existingParcelIndex >= 0) {
+        // Remove the parcel if it's already selected
+        return prevParcels.filter(p => p.id !== parcelId);
+      } else if (buildingDetails) {
+        // Add the parcel if it's not already selected and we have building details
+        setActiveTab("selected"); // Switch to selected tab when adding a parcel
+        return [...prevParcels, { id: parcelId, buildingDetails }];
+      }
+      return prevParcels;
+    });
+  }, [setActiveTab]);
+
   const handleCreateProposal = useCallback(() => {
     setShowProposalModal(true);
   }, []);
@@ -1096,6 +1421,8 @@ export default function Home() {
 
   const contextValue = {
     selectedParcels,
+    selectedMyParcel,
+    setSelectedMyParcel,
     activeTab,
     setActiveTab,
     parcelOwners,
@@ -1105,6 +1432,7 @@ export default function Home() {
     setShowProposalModal,
     highlightedParcelIds,
     setHighlightedParcelIds,
+    setFilteredProposals,
   };
 
   return (
@@ -1136,12 +1464,16 @@ export default function Home() {
 
         {/* Lower Left - List */}
         <div className="w-1/2 h-1/2 border-r border-base-300 overflow-auto">
-          <ListPanel onParcelSelect={handleParcelSelect} />
+          <ListPanel onParcelSelect={handleParcelSelect} proposals={proposals} selectedMyParcel={selectedMyParcel} />
         </div>
 
         {/* Lower Right - Proposals */}
         <div className="w-1/2 h-1/2 overflow-auto">
-          <ProposalsPanel proposals={proposals} loadAllProposals={loadAllProposals} />
+          <ProposalsPanel
+            proposals={filteredProposals.length > 0 ? filteredProposals : proposals}
+            loadAllProposals={loadAllProposals}
+            nativeCurrencyPrice={0.008}
+          />
         </div>
 
         {/* Proposal Modal */}
