@@ -10,6 +10,8 @@ Features by priority:
 - figure out the initial setup for demo purposes. Do we use hardhat-generated HD wallet and import into Metamask? Do we use the Metamask seed phrase in hardhat? Do we use Metamask public addresses in minting parcel NFTs? (seems to make most sense). Do we have a setup page where user can enter 5 or so of his own Metamask addresses?
 - fix Load Parcel Data so that roads are parcels correctly (low priority)
 - add Owner to parcel cards in the Parcels panel. Owner should be the blockhain address that owns the parcel NFT.
+- Sort proposals by value descending
+- Add notification to My Parcels or somewhere else when one of your parcels receives new proposals
 
 
 Uploaded example:

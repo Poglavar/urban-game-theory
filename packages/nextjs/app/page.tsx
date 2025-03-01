@@ -204,13 +204,13 @@ const BuildingDetailsTooltip = ({ buildingDetails }: { buildingDetails: Building
 
 // Update the ListPanel component
 const ListPanel = React.memo(({ onParcelSelect }: { onParcelSelect?: (parcelId: string | null, buildingDetails: BuildingDetails | null) => void }) => {
-  const { selectedParcels, activeTab, setActiveTab, parcelOwners, parcelNFTContract, setParcelOwners, setHighlightedParcelId } = useContext(AppContext);
+  const { selectedParcels, activeTab, setActiveTab, parcelOwners, parcelNFTContract, setParcelOwners, setHighlightedParcelIds } = useContext(AppContext);
   const { address } = useAccount();
   const [ownedParcels, setOwnedParcels] = useState<OwnedParcel[]>([]);
   const [isLoadingOwned, setIsLoadingOwned] = useState(false);
 
   const handleParcelClick = (parcelId: string) => {
-    setHighlightedParcelId(parcelId);
+    setHighlightedParcelIds([parcelId]);
   };
 
   // Fetch owned parcels when the "my" tab is active
@@ -410,8 +410,8 @@ const AppContext = React.createContext<{
   setParcelOwners: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   firstProposal: any;
   setShowProposalModal: (show: boolean) => void;
-  highlightedParcelId: string | null;
-  setHighlightedParcelId: (id: string | null) => void;
+  highlightedParcelIds: string[];
+  setHighlightedParcelIds: (ids: string[]) => void;
 }>({
   selectedParcels: [],
   activeTab: "my",
@@ -421,13 +421,18 @@ const AppContext = React.createContext<{
   setParcelOwners: () => { },
   firstProposal: null,
   setShowProposalModal: () => { },
-  highlightedParcelId: null,
-  setHighlightedParcelId: () => { },
+  highlightedParcelIds: [],
+  setHighlightedParcelIds: () => { },
 });
 
 // Update ProposalsPanel to be memoized
 const ProposalsPanel = React.memo(({ proposals, loadAllProposals }: { proposals: ProposalData[]; loadAllProposals: () => Promise<void> }) => {
-  const { selectedParcels, setShowProposalModal } = useContext(AppContext);
+  const { selectedParcels, setShowProposalModal, setHighlightedParcelIds } = useContext(AppContext);
+
+  const handleProposalClick = (proposal: ProposalData) => {
+    // Highlight all parcels in the proposal
+    setHighlightedParcelIds(proposal.parcelIds);
+  };
 
   return (
     <div className="p-4">
@@ -436,7 +441,11 @@ const ProposalsPanel = React.memo(({ proposals, loadAllProposals }: { proposals:
         {proposals.length > 0 ? (
           <div className="grid grid-cols-1 gap-4">
             {proposals.map((proposal) => (
-              <div key={proposal.tokenId} className="card bg-base-100 shadow-xl">
+              <div
+                key={proposal.tokenId}
+                className="card bg-base-100 shadow-xl cursor-pointer hover:bg-opacity-70 transition-colors"
+                onClick={() => handleProposalClick(proposal)}
+              >
                 <div className="card-body">
                   <div className="flex justify-between items-start">
                     <h3 className="card-title text-lg">{proposal.metadata.name}</h3>
@@ -487,7 +496,7 @@ export default function Home() {
   const [isLoadingProposals, setIsLoadingProposals] = useState(false);
   const [memeTokenData, setMemeTokenData] = useState<any>(null);
   const [isLoadingMemeData, setIsLoadingMemeData] = useState(false);
-  const [highlightedParcelId, setHighlightedParcelId] = useState<string | null>(null);
+  const [highlightedParcelIds, setHighlightedParcelIds] = useState<string[]>([]);
   const [proposals, setProposals] = useState<ProposalData[]>([]);
 
   const { writeContractAsync: writeProposalNFT } = useScaffoldWriteContract({
@@ -564,13 +573,23 @@ export default function Home() {
       const owner = await parcelNFTContract.read.ownerOf([BigInt(parcelId)]);
       console.log('Owner found for parcel', parcelId, ':', owner);
       setParcelOwners(prev => ({ ...prev, [parcelId]: owner }));
-    } catch (error) {
-      console.error('Error checking ownership for parcel', parcelId, ':', {
-        error,
-        errorMessage: error instanceof Error ? error.message : 'Unknown error',
-        contractAddress: parcelNFTContract.target
-      });
-      setParcelOwners(prev => ({ ...prev, [parcelId]: "Not minted" }));
+    } catch (error: any) {
+      // Check if the error is due to non-existent token
+      if (error.message && (
+        error.message.includes("ERC721Nonexistent") ||
+        error.message.includes("nonexistent token") ||
+        error.message.includes("ownerOf reverted")
+      )) {
+        console.log('Parcel', parcelId, 'is not minted yet');
+        setParcelOwners(prev => ({ ...prev, [parcelId]: "Not minted" }));
+      } else {
+        console.error('Error checking ownership for parcel', parcelId, ':', {
+          error,
+          errorMessage: error instanceof Error ? error.message : 'Unknown error',
+          contractAddress: parcelNFTContract.target
+        });
+        setParcelOwners(prev => ({ ...prev, [parcelId]: "Error checking ownership" }));
+      }
     }
   };
 
@@ -607,7 +626,7 @@ export default function Home() {
       const totalSupply = await proposalNFTContract.read.totalSupply();
 
       // Load each proposal by index
-      for (let i = 0; i < totalSupply; i++) {
+      for (let i = 0; i < Number(totalSupply); i++) {
         try {
           // Get token ID at current index
           const tokenId = await proposalNFTContract.read.tokenByIndex([BigInt(i)]);
@@ -1013,58 +1032,50 @@ export default function Home() {
           <h3 className="font-bold text-lg mb-4">City Meme Token Status</h3>
           <div className="space-y-4">
             <div className="bg-white/10 backdrop-blur-sm p-4 rounded-lg">
-              <h4 className="font-semibold mb-2">Market Information</h4>
               <div className="space-y-2">
                 <p><span className="font-medium">Current Market Value:</span> $0.008</p>
                 <p><span className="font-medium">Current Market Cap:</span> ${((totalSupply ?
                   Number(totalSupply) / 10 ** 18 : 0) * 0.008).toLocaleString()}</p>
-                <p>
-                  <span className="font-medium">Coingecko:</span>{' '}
-                  <a
-                    href="https://www.coingecko.com"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="link text-blue-300 hover:text-blue-200"
-                  >
-                    View on Coingecko
-                  </a>
-                </p>
               </div>
             </div>
 
             <div className="bg-white/10 backdrop-blur-sm p-4 rounded-lg">
-              <h4 className="font-semibold mb-2">Token Information</h4>
               <div className="space-y-2">
                 <p><span className="font-medium">Name:</span> Zagreb Meme Token</p>
                 <p><span className="font-medium">Symbol:</span> ZAGREB</p>
                 <p><span className="font-medium">Deployment Date:</span> March 1, 2025</p>
                 <p>
                   <span className="font-medium">Contract Address:</span>{' '}
-                  <a
-                    href={`https://sepolia.etherscan.io/address/${memeTokenContract?.target}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="link text-blue-300 hover:text-blue-200"
-                  >
-                    {memeTokenContract?.target}
-                  </a>
+                  {memeTokenContract && (
+                    <a
+                      href={`https://sepolia.etherscan.io/address/${memeTokenContract.address}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="link text-blue-300 hover:text-blue-200"
+                    >
+                      {memeTokenContract.address}
+                    </a>
+                  )}
                 </p>
                 <p>
                   <span className="font-medium">Contract Creator:</span>{' '}
-                  <a
-                    href={`https://sepolia.etherscan.io/address/${owner}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="link text-blue-300 hover:text-blue-200"
-                  >
-                    {owner}
-                  </a>
+                  {owner ? (
+                    <a
+                      href={`https://sepolia.etherscan.io/address/${owner}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="link text-blue-300 hover:text-blue-200"
+                    >
+                      {owner}
+                    </a>
+                  ) : (
+                    <span className="text-white/70">Not available</span>
+                  )}
                 </p>
               </div>
             </div>
 
             <div className="bg-white/10 backdrop-blur-sm p-4 rounded-lg">
-              <h4 className="font-semibold mb-2">Supply Information</h4>
               <div className="space-y-2">
                 <p><span className="font-medium">Initial Supply:</span> 1,000,000,000 ZAGREB</p>
                 <p><span className="font-medium">Current Supply:</span> {totalSupply ?
@@ -1114,8 +1125,8 @@ export default function Home() {
     setParcelOwners,
     firstProposal,
     setShowProposalModal,
-    highlightedParcelId,
-    setHighlightedParcelId,
+    highlightedParcelIds,
+    setHighlightedParcelIds,
   };
 
   return (
@@ -1127,7 +1138,7 @@ export default function Home() {
             onParcelSelect={handleParcelSelect}
             onAnalyze={() => setIsAnalyzingParcels(false)}
             selectedParcelIds={selectedParcels.map(p => p.id)}
-            highlightedParcelId={highlightedParcelId}
+            highlightedParcelIds={highlightedParcelIds}
             isAnalyzing={isAnalyzingParcels}
           />
         </div>

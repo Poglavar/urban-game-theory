@@ -46,30 +46,27 @@ export const Footer = () => {
       <div className="w-full">
         <ul className="menu menu-horizontal w-full">
           <div className="flex justify-center items-center gap-2 text-sm w-full">
-            <div className="text-center">
-              <a href="https://github.com/scaffold-eth/se-2" target="_blank" rel="noreferrer" className="link">
-                Fork me
-              </a>
-            </div>
-            <span>·</span>
             <div className="flex justify-center items-center gap-2">
               <p className="m-0 text-center">
-                Built with <HeartIcon className="inline-block h-4 w-4" /> at
+                Built with <HeartIcon className="inline-block h-4 w-4" /> at ETH Denver 2025
               </p>
+              <span>·</span>
               <a
-                className="flex justify-center items-center gap-1"
-                href="https://buidlguidl.com/"
+                href="https://docs.google.com/document/d/e/2PACX-1vSJUX5lV2FhromVOyd_vnfVVFEdzEApknHZbHewJV0aGwABSwEYSPelFzTSIMWgYb-0ypSEHuopQem2/pub"
                 target="_blank"
                 rel="noreferrer"
+                className="link"
               >
-                <BuidlGuidlLogo className="w-3 h-5 pb-1" />
-                <span className="link">BuidlGuidl</span>
+                Slide Deck
               </a>
-            </div>
-            <span>·</span>
-            <div className="text-center">
-              <a href="https://t.me/joinchat/KByvmRe5wkR-8F_zz6AjpA" target="_blank" rel="noreferrer" className="link">
-                Support
+              <span>·</span>
+              <a
+                href="https://t.me/+DSkX8A_9H31mMzY0"
+                target="_blank"
+                rel="noreferrer"
+                className="link"
+              >
+                Telegram Group
               </a>
             </div>
           </div>
