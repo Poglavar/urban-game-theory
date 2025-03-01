@@ -4,32 +4,31 @@ Features by priority:
 + make it so each parcel is minted as an NFT upon "Load Parcel Data" being clicked, but only if it doesn't already exist. When they are minted, they should be placed randomly in the wallets of the users. The users's wallets should be the ones we have generated from the seed phrase.
 + Create a "Proposals and Offers" panel, which shows all the proposals and offers for the selected parcels
 + Once Load Parcel Data is clicked, and after generating parcels and displaying them is completed, parse all parcels and silently mint NFTs in the background for those that do not have an NFT attached. Set the owner a random address out of five addresses provided in .env
++ add Owner to parcel cards in the Parcels panel. Owner should be the blockhain address that owns the parcel NFT.
++ Sort proposals by value descending
++ add budgets (of various tokens) to proposal NFTs
++ add accept capability for parcels and proposals
++ add proposal monetary value to the card
++ add accept button to the card
++ add acceptanceCount below Parcels in the proposal car, to show how many parcels have accepted. Instead of just a number make it green filled vs empty circles, or some such.
++ add public function distributeFunds() to the proposal smart contract. Solve: how are funds sent to a particular NFT, not whole contract? Needs to be done with depositFunds(NFTID) function. What to do with funds mistakenly sent to the contract? Use them to fund something too. Or enable the sending address to withdraw (but how will we know the sending address)
++ add button Donate to proposal to the proposal card, with
 - Check bounties
 - Deploy the project to an EVM blockchain
 - Deploy the project to Vercel or some such service
 - figure out the initial setup for demo purposes. Do we use hardhat-generated HD wallet and import into Metamask? Do we use the Metamask seed phrase in hardhat? Do we use Metamask public addresses in minting parcel NFTs? (seems to make most sense). Do we have a setup page where user can enter 5 or so of his own Metamask addresses?
 - fix Load Parcel Data so that roads are parcels correctly (low priority)
 - fix image URIs so that Metamask, Opensea et all see the images correctly
-+ add Owner to parcel cards in the Parcels panel. Owner should be the blockhain address that owns the parcel NFT.
-- Sort proposals by value descending
 - Add notification to My Parcels or somewhere else when one of your parcels receives new proposals
 - give proposals stable URLs in the platform (well aren't NFTs already that?)
-- add budgets (of various tokens) to proposal NFTs
 - add share of upside slider
 - add button to tweet "I have created a new urban proposal!"
-- add accept capability for parcels and proposals
 - add claim capability for parcels
-- add proposal monetary value to the card
 - add your share to the card 
-- add accept button to the card
-- add Completion below PArcels in the proposal car, to show how many parcels have accepted. Instead of just a number make it green filled vs empty circles, or some such.
 - add functionality what happens when all have accepted. Some animation. Funds are distributed to the wallets of the parcel owners. Proposal set to Completed. Ownership of parcels is transferred to Proposal owner.
-- add public function distributeFunds() to the proposal smart contract. Solve: how are funds sent to a particular NFT, not whole contract? Needs to be done with depositFunds(NFTID) function. What to do with funds mistakenly sent to the contract? Use them to fund something too. Or enable the sending address to withdraw (but how will we know the sending address)
 - Q: can this be gamified into a monopoly-like game? Where people strategically purchase parcels so they unlock higher building ratios, which airdrops them more meme tokens?
-- add button Donate to proposal to the proposal card, with 
 
-
-Uploaded example:
+Uploaded image example:
 https://ipfs.io/ipfs/QmUQw24iZPaJmijwyesv7D8AC46gifymTdqJ9eiepEpqw2
 
 + Let's work on the Meme Token Status modal. It should pop up when the Meme Token Status button is pressed. The style should be generally be the same as for the proposal modal. The title of the modal should be "City Meme Token Status". The data in the modal should be:

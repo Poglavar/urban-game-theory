@@ -4,8 +4,7 @@ import { useState, useRef, useEffect, useCallback, useContext } from "react";
 import { useAccount } from "wagmi";
 import { useWalletClient } from "wagmi";
 import { RainbowKitCustomConnectButton } from "~~/components/scaffold-eth";
-import { useScaffoldWriteContract } from "~~/hooks/scaffold-eth/useScaffoldWriteContract";
-import { useScaffoldContract } from "~~/hooks/scaffold-eth/useScaffoldContract";
+import { useScaffoldWriteContract, useScaffoldContract } from "~~/hooks/scaffold-eth";
 import { useScaffoldReadContract } from "~~/hooks/scaffold-eth/useScaffoldReadContract";
 import { useScaffoldContractWrite } from "~~/hooks/scaffold-eth/useScaffoldContractWrite";
 import MapView from "~~/components/map/MapView";
@@ -550,6 +549,7 @@ const ProposalsPanel = React.memo(({ proposals, loadAllProposals, nativeCurrency
   nativeCurrencyPrice?: number;
 }) => {
   const { selectedMyParcel, setHighlightedParcelIds, activeTab } = useContext(AppContext);
+  const [selectedProposal, setSelectedProposal] = useState<ProposalData | null>(null);
   const [acceptedProposals, setAcceptedProposals] = useState<Record<string, boolean>>({});
   const [isCheckingAcceptance, setIsCheckingAcceptance] = useState(false);
   const { writeContractAsync: writeProposalNFT } = useScaffoldWriteContract({
@@ -558,6 +558,59 @@ const ProposalsPanel = React.memo(({ proposals, loadAllProposals, nativeCurrency
   const { data: proposalNFTContract } = useScaffoldContract({
     contractName: "ProposalNFT",
   }) as { data: Contract<any> | null };
+
+  const handleAcceptProposal = async (proposalId: bigint, parcelId: string | null) => {
+    if (!parcelId) {
+      notification.error("No parcel selected");
+      return;
+    }
+
+    try {
+      notification.info("Accepting proposal...");
+      console.log("Accepting proposal with ID:", proposalId.toString(), "and parcel:", parcelId);
+
+      const txHash = await writeProposalNFT({
+        functionName: "acceptProposal",
+        args: [proposalId, parcelId],
+      });
+
+      notification.info("Waiting for transaction confirmation...");
+      await txHash;
+      notification.success("Proposal accepted successfully!");
+
+      // Reload proposals to update acceptance count
+      await loadAllProposals();
+    } catch (error) {
+      console.error("Error accepting proposal:", error);
+      notification.error(error instanceof Error ? error.message : "Failed to accept proposal");
+    }
+  };
+
+  const handleDonateToProposal = async (proposal: ProposalData) => {
+    if (!proposalNFTContract) {
+      notification.error("Contract not initialized");
+      return;
+    }
+
+    try {
+      notification.info("Processing donation...");
+      const txHash = await writeProposalNFT({
+        functionName: "depositFunds",
+        args: [proposal.tokenId],
+        value: parseEther("0.1"), // Default donation of 0.1 ETH
+      });
+
+      notification.info("Waiting for transaction confirmation...");
+      await txHash;
+      notification.success("Successfully donated to proposal!");
+
+      // Reload proposals to update the budget
+      await loadAllProposals();
+    } catch (error) {
+      console.error("Error donating to proposal:", error);
+      notification.error(error instanceof Error ? error.message : "Failed to donate to proposal");
+    }
+  };
 
   // Check acceptance status only when dependencies change
   useEffect(() => {
@@ -606,35 +659,8 @@ const ProposalsPanel = React.memo(({ proposals, loadAllProposals, nativeCurrency
   };
 
   const handleProposalClick = (proposal: ProposalData) => {
-    // Highlight all parcels in the proposal
+    setSelectedProposal(proposal);
     setHighlightedParcelIds(proposal.parcelIds);
-  };
-
-  const handleAcceptProposal = async (proposalId: bigint, parcelId: string | null) => {
-    if (!parcelId) {
-      notification.error("No parcel selected");
-      return;
-    }
-
-    try {
-      notification.info("Accepting proposal...");
-      console.log("Accepting proposal with ID:", proposalId.toString(), "and parcel:", parcelId);
-
-      const txHash = await writeProposalNFT({
-        functionName: "acceptProposal",
-        args: [proposalId, parcelId],
-      });
-
-      notification.info("Waiting for transaction confirmation...");
-      await txHash;
-      notification.success("Proposal accepted successfully!");
-
-      // Reload proposals to update acceptance count
-      await loadAllProposals();
-    } catch (error) {
-      console.error("Error accepting proposal:", error);
-      notification.error(error instanceof Error ? error.message : "Failed to accept proposal");
-    }
   };
 
   // Sort proposals by budget
@@ -666,6 +692,33 @@ const ProposalsPanel = React.memo(({ proposals, loadAllProposals, nativeCurrency
       proposal.parcelIds.includes(selectedMyParcel);
   };
 
+  // Add donation function
+  const handleDonation = async (proposal: ProposalData) => {
+    if (!writeProposalNFT) {
+      notification.error("Contract not initialized");
+      return;
+    }
+
+    try {
+      notification.info("Processing donation...");
+      const txHash = await writeProposalNFT({
+        functionName: "donate",
+        args: [proposal.tokenId],
+        value: parseEther("0.1"), // Default donation of 0.1 ETH
+      });
+
+      notification.info("Waiting for transaction confirmation...");
+      await txHash;
+      notification.success("Thank you for your donation!");
+
+      // Reload proposals to update the budget
+      await loadAllProposals();
+    } catch (error) {
+      console.error("Error donating:", error);
+      notification.error(error instanceof Error ? error.message : "Failed to donate");
+    }
+  };
+
   return (
     <div className="p-4">
       <h2 className="text-2xl font-bold mb-4">Proposals</h2>
@@ -689,8 +742,19 @@ const ProposalsPanel = React.memo(({ proposals, loadAllProposals, nativeCurrency
                               "badge-accent"
                         }`}>{proposal.metadata.type}</span>
                     </div>
-                    <div className="badge badge-lg bg-success/10 text-success border-success/20">
-                      ${calculateBudget(proposal.ethAmount, proposal.tokenAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <div className="flex flex-col items-end gap-2">
+                      <div className="badge badge-lg bg-success/10 text-success border-success/20">
+                        ${calculateBudget(proposal.ethAmount, proposal.tokenAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                      <button
+                        className="btn btn-xs btn-outline btn-success"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDonation(proposal);
+                        }}
+                      >
+                        Donate to budget
+                      </button>
                     </div>
                   </div>
                   <p className="text-sm text-base-content/70 mb-2">{proposal.metadata.description}</p>
@@ -699,9 +763,19 @@ const ProposalsPanel = React.memo(({ proposals, loadAllProposals, nativeCurrency
                       <span className="text-base-content/70">Parcels:</span>
                       <span className="font-medium">{proposal.parcelIds.length}</span>
                     </div>
-                    <div className="flex gap-2">
-                      <span className="text-base-content/70">Accepted:</span>
-                      <span className="font-medium">{proposal.acceptanceCount || 0}</span>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-base-content/70">Progress:</span>
+                      <div className="flex gap-1 items-center">
+                        {[...Array(proposal.parcelIds.length)].map((_, index) => (
+                          <div
+                            key={index}
+                            className={`w-2 h-2 rounded-full ${index < (proposal.acceptanceCount || 0)
+                                ? "bg-success"
+                                : "border border-base-content/30"
+                              }`}
+                          />
+                        ))}
+                      </div>
                     </div>
                     <div className="flex gap-2">
                       <span className="text-base-content/70">Status:</span>
@@ -768,7 +842,7 @@ export default function Home() {
   const [proposals, setProposals] = useState<ProposalData[]>([]);
   const [filteredProposals, setFilteredProposals] = useState<ProposalData[]>([]);
 
-  const { writeContractAsync: writeProposalNFT } = useScaffoldWriteContract({
+  const { writeAsync: writeProposalNFT } = useScaffoldWriteContract({
     contractName: "ProposalNFT",
   });
 
@@ -949,12 +1023,12 @@ export default function Home() {
     const mapRef = useRef(null);
 
     // First, approve the CityToken if needed
-    const { writeContractAsync: approveCityToken } = useScaffoldWriteContract({
+    const { writeAsync: approveCityToken } = useScaffoldWriteContract({
       contractName: "CityMemeToken",
     });
 
     // Then use mintAndFund
-    const { writeContractAsync: writeProposalNFT } = useScaffoldWriteContract({
+    const { writeAsync: writeProposalNFT } = useScaffoldWriteContract({
       contractName: "ProposalNFT",
     });
 
