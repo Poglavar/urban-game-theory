@@ -208,15 +208,21 @@ const ListPanel = React.memo(({ onParcelSelect }: { onParcelSelect?: (parcelId: 
   const { address } = useAccount();
   const [ownedParcels, setOwnedParcels] = useState<OwnedParcel[]>([]);
   const [isLoadingOwned, setIsLoadingOwned] = useState(false);
+  const [hasLoadedParcels, setHasLoadedParcels] = useState(false);
 
-  const handleParcelClick = (parcelId: string) => {
+  const handleParcelClick = useCallback((parcelId: string) => {
     setHighlightedParcelIds([parcelId]);
-  };
+  }, [setHighlightedParcelIds]);
 
-  // Fetch owned parcels when the "my" tab is active
+  // Fetch owned parcels only when necessary
   useEffect(() => {
+    const shouldFetchParcels = !hasLoadedParcels &&
+      activeTab === "my" &&
+      parcelNFTContract &&
+      address;
+
     const fetchOwnedParcels = async () => {
-      if (!parcelNFTContract || !address || activeTab !== "my") return;
+      if (!shouldFetchParcels) return;
 
       setIsLoadingOwned(true);
       try {
@@ -247,6 +253,7 @@ const ListPanel = React.memo(({ onParcelSelect }: { onParcelSelect?: (parcelId: 
         }
 
         setOwnedParcels(owned);
+        setHasLoadedParcels(true);
       } catch (error) {
         console.error('Error fetching owned parcels:', error);
       } finally {
@@ -255,53 +262,93 @@ const ListPanel = React.memo(({ onParcelSelect }: { onParcelSelect?: (parcelId: 
     };
 
     fetchOwnedParcels();
-  }, [parcelNFTContract, address, activeTab]);
+  }, [parcelNFTContract, address, activeTab, hasLoadedParcels]);
 
-  // Fetch owners for selected parcels
+  // Reset loaded state when address changes
   useEffect(() => {
-    const fetchOwners = async () => {
-      console.log('ListPanel Contract Status:', {
-        hasContract: !!parcelNFTContract,
-        contractAddress: parcelNFTContract?.target,
-        selectedParcels: selectedParcels.length,
-        contractMethods: parcelNFTContract ? Object.keys(parcelNFTContract) : [],
-        contractFunctions: parcelNFTContract ? Object.getOwnPropertyNames(Object.getPrototypeOf(parcelNFTContract)) : []
-      });
+    setHasLoadedParcels(false);
+  }, [address]);
 
-      if (!parcelNFTContract) {
-        console.error('ParcelNFT contract not available in ListPanel');
-        return;
-      }
-
-      const newParcelIds = selectedParcels
-        .filter(parcel => !parcelOwners[parcel.id])
-        .map(parcel => parcel.id);
-
-      console.log('Fetching owners for parcels:', {
-        newParcelIds,
-        currentOwners: parcelOwners
-      });
-
-      for (const parcelId of newParcelIds) {
-        try {
-          console.log(`Checking ownership for parcel ${parcelId} using contract at ${parcelNFTContract.target}`);
-          const owner = await parcelNFTContract.read.ownerOf([BigInt(parcelId)]);
-          console.log(`Owner found for parcel ${parcelId}:`, owner);
-          setParcelOwners(prev => ({ ...prev, [parcelId]: owner }));
-        } catch (error) {
-          console.error(`Error checking ownership for parcel ${parcelId}:`, {
-            error,
-            errorMessage: error instanceof Error ? error.message : 'Unknown error'
-          });
-          setParcelOwners(prev => ({ ...prev, [parcelId]: "Not minted" }));
-        }
-      }
-    };
-
-    if (selectedParcels.length > 0) {
-      fetchOwners();
+  // Render owned parcels list
+  const renderOwnedParcels = useCallback(() => {
+    if (!address) {
+      return (
+        <div className="text-center py-8">
+          <p className="text-base-content/70 mb-4">Connect your wallet to view your parcels</p>
+          <RainbowKitCustomConnectButton />
+        </div>
+      );
     }
-  }, [selectedParcels, parcelNFTContract, parcelOwners, setParcelOwners]);
+
+    if (isLoadingOwned) {
+      return (
+        <div className="text-center py-8">
+          <span className="loading loading-spinner loading-lg"></span>
+          <p className="mt-4 text-base-content/70">Loading your parcels...</p>
+        </div>
+      );
+    }
+
+    if (ownedParcels.length === 0) {
+      return (
+        <div className="text-center py-8">
+          <p className="text-base-content/70">You don't own any parcels yet</p>
+        </div>
+      );
+    }
+
+    return ownedParcels.map((parcel) => (
+      <div
+        key={parcel.id}
+        className="bg-base-200 p-4 rounded-lg cursor-pointer hover:bg-base-300 transition-colors"
+        onClick={() => handleParcelClick(parcel.id)}
+      >
+        <h3 className="text-xl font-semibold mb-2">Parcel</h3>
+        <p className="text-sm">ID: {parcel.id}</p>
+        <p className="text-sm">OSM ID: {parcel.osmId}</p>
+        <p className="text-sm text-base-content/70 mt-1">
+          Owner: <span className="font-mono">{parcel.owner}</span>
+        </p>
+      </div>
+    ));
+  }, [address, isLoadingOwned, ownedParcels, handleParcelClick]);
+
+  // Render selected parcels list
+  const renderSelectedParcels = useCallback(() => {
+    if (selectedParcels.length === 0) {
+      return <p>No parcels selected</p>;
+    }
+
+    return selectedParcels.map((parcel) => (
+      <div key={parcel.id} className="bg-base-200 p-4 rounded-lg relative">
+        <button
+          className="btn btn-ghost btn-xs absolute top-2 right-2"
+          onClick={() => onParcelSelect?.(parcel.id, null)}
+        >
+          ✕
+        </button>
+        <h3 className="text-xl font-semibold mb-2">Parcel</h3>
+        <div className="group relative inline-block">
+          <div className="text-sm hover:text-primary cursor-help">
+            {parcel.id}
+            <div className="opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-200 absolute left-0 top-full mt-1 z-[99999] bg-[#e6d5b8] rounded-lg shadow-xl border border-[#d4bc94] w-[25vw] text-black transform -translate-x-1/4">
+              <BuildingDetailsTooltip buildingDetails={parcel.buildingDetails} />
+            </div>
+          </div>
+        </div>
+        <p className="text-sm text-base-content/70">Building: {parcel.buildingDetails?.tags.building || 'Unknown'}</p>
+        <p className="text-sm text-base-content/70 mt-1">
+          Owner: {parcelOwners[parcel.id] === "Not minted" ? (
+            <span className="text-warning">Not minted</span>
+          ) : parcelOwners[parcel.id] ? (
+            <span className="font-mono">{parcelOwners[parcel.id]}</span>
+          ) : (
+            <span className="loading loading-dots">Loading</span>
+          )}
+        </p>
+      </div>
+    ));
+  }, [selectedParcels, parcelOwners, onParcelSelect]);
 
   return (
     <div className="p-4">
@@ -323,78 +370,9 @@ const ListPanel = React.memo(({ onParcelSelect }: { onParcelSelect?: (parcelId: 
       </div>
 
       <div className={`p-4 bg-base-100 rounded-b-box border-base-300 border-2 border-t-0`}>
-        {activeTab === "selected" ? (
-          <div className="space-y-2">
-            {selectedParcels.length > 0 ? (
-              selectedParcels.map((parcel) => (
-                <div key={parcel.id} className="bg-base-200 p-4 rounded-lg relative">
-                  <button
-                    className="btn btn-ghost btn-xs absolute top-2 right-2"
-                    onClick={() => {
-                      onParcelSelect?.(parcel.id, null);
-                    }}
-                  >
-                    ✕
-                  </button>
-                  <h3 className="text-xl font-semibold mb-2">Parcel</h3>
-                  <div className="group relative inline-block">
-                    <div className="text-sm hover:text-primary cursor-help">
-                      {parcel.id}
-                      <div className="opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity duration-200 absolute left-0 top-full mt-1 z-[99999] bg-[#e6d5b8] rounded-lg shadow-xl border border-[#d4bc94] w-[25vw] text-black transform -translate-x-1/4">
-                        <BuildingDetailsTooltip buildingDetails={parcel.buildingDetails} />
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-sm text-base-content/70">Building: {parcel.buildingDetails?.tags.building || 'Unknown'}</p>
-                  <p className="text-sm text-base-content/70 mt-1">
-                    Owner: {parcelOwners[parcel.id] === "Not minted" ? (
-                      <span className="text-warning">Not minted</span>
-                    ) : parcelOwners[parcel.id] ? (
-                      <span className="font-mono">{parcelOwners[parcel.id]}</span>
-                    ) : (
-                      <span className="loading loading-dots">Loading</span>
-                    )}
-                  </p>
-                </div>
-              ))
-            ) : (
-              <p>No parcels selected</p>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {!address ? (
-              <div className="text-center py-8">
-                <p className="text-base-content/70 mb-4">Connect your wallet to view your parcels</p>
-                <RainbowKitCustomConnectButton />
-              </div>
-            ) : isLoadingOwned ? (
-              <div className="text-center py-8">
-                <span className="loading loading-spinner loading-lg"></span>
-                <p className="mt-4 text-base-content/70">Loading your parcels...</p>
-              </div>
-            ) : ownedParcels.length > 0 ? (
-              ownedParcels.map((parcel) => (
-                <div
-                  key={parcel.id}
-                  className="bg-base-200 p-4 rounded-lg cursor-pointer hover:bg-base-300 transition-colors"
-                  onClick={() => handleParcelClick(parcel.id)}
-                >
-                  <h3 className="text-xl font-semibold mb-2">Parcel</h3>
-                  <p className="text-sm">ID: {parcel.id}</p>
-                  <p className="text-sm">OSM ID: {parcel.osmId}</p>
-                  <p className="text-sm text-base-content/70 mt-1">
-                    Owner: <span className="font-mono">{parcel.owner}</span>
-                  </p>
-                </div>
-              ))
-            ) : (
-              <div className="text-center py-8">
-                <p className="text-base-content/70">You don't own any parcels yet</p>
-              </div>
-            )}
-          </div>
-        )}
+        <div className="space-y-2">
+          {activeTab === "selected" ? renderSelectedParcels() : renderOwnedParcels()}
+        </div>
       </div>
     </div>
   );
