@@ -591,32 +591,6 @@ const ProposalsPanel = React.memo(({ proposals, loadAllProposals, nativeCurrency
     }
   };
 
-  const handleDonateToProposal = async (proposal: ProposalData) => {
-    if (!proposalNFTContract) {
-      notification.error("Contract not initialized");
-      return;
-    }
-
-    try {
-      notification.info("Processing donation...");
-      const txHash = await writeProposalNFT({
-        functionName: "depositFunds",
-        args: [proposal.tokenId],
-        value: parseEther("0.1"), // Default donation of 0.1 ETH
-      });
-
-      notification.info("Waiting for transaction confirmation...");
-      await txHash;
-      notification.success("Successfully donated to proposal!");
-
-      // Reload proposals to update the budget
-      await loadAllProposals();
-    } catch (error) {
-      console.error("Error donating to proposal:", error);
-      notification.error(error instanceof Error ? error.message : "Failed to donate to proposal");
-    }
-  };
-
   // Check acceptance status only when dependencies change
   useEffect(() => {
     const checkAcceptance = async () => {
@@ -695,35 +669,6 @@ const ProposalsPanel = React.memo(({ proposals, loadAllProposals, nativeCurrency
     return activeTab === "my" &&
       !!selectedMyParcel &&
       proposal.parcelIds.includes(selectedMyParcel);
-  };
-
-  // Add donation function
-  const handleDonate = async () => {
-    if (!address) {
-      notification.error("Please connect your wallet");
-      return;
-    }
-
-    if (!selectedProposal) {
-      notification.error("No proposal selected");
-      return;
-    }
-
-    try {
-      notification.info("Processing donation...");
-      const tx = await writeProposalNFT({
-        functionName: "depositFunds",
-        args: [selectedProposal.tokenId],
-        value: parseEther("0.1"), // Default donation of 0.1 ETH
-      });
-      await tx;
-      notification.success("Donation successful!");
-      setSelectedProposal(null);
-      setHighlightedParcelIds([]);
-    } catch (error) {
-      console.error("Error donating:", error);
-      notification.error(error instanceof Error ? error.message : "Failed to donate");
-    }
   };
 
   return (
