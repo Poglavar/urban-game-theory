@@ -1178,7 +1178,7 @@ const deployedContracts = {
       },
     },
     ProposalNFT: {
-      address: "0x9A676e781A523b5d0C0e43731313A708CB607508",
+      address: "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
       abi: [
         {
           inputs: [

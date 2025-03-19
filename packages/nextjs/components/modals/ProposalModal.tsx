@@ -19,6 +19,31 @@ interface ProposalModalProps {
     loadAllProposals: () => Promise<void>;
 }
 
+// List of adjectives and nouns for random name generation
+const adjectives = [
+    "Majestic", "Peaceful", "Vibrant", "Serene", "Elegant", "Charming", "Graceful",
+    "Harmonious", "Delightful", "Enchanting", "Beautiful", "Perfect", "Authentic",
+    "Wonderful", "Pleasant", "Glorious", "Bright", "Scenic", "Attractive", "Lovely",
+    "Magnificent", "Pristine", "Splendid", "Tranquil", "Lively", "Radiant", "Natural"
+];
+
+const nouns = [
+    "Garden", "Valley", "Meadow", "Forest", "River", "Mountain", "Lake", "Bridge",
+    "Path", "Grove", "Plaza", "Park", "Square", "Avenue", "Boulevard", "Terrace",
+    "Promenade", "Commons", "Courtyard", "District", "Gateway", "Passage", "Crossing",
+    "Circle", "Corner", "Junction", "Oasis", "Haven", "Sanctuary"
+];
+
+const generateRandomName = (type: string): string => {
+    const randomAdjective = adjectives[Math.floor(Math.random() * adjectives.length)];
+    const randomNoun = nouns[Math.floor(Math.random() * nouns.length)];
+    return `${randomAdjective} ${randomNoun} ${type}`;
+};
+
+const generateDescription = (type: string): string => {
+    return `This is a proposal to build a new ${type.toLowerCase()}. The proposer firmly believes it will serve the entire community.`;
+};
+
 export const ProposalModal = ({
     showProposalModal,
     setShowProposalModal,
@@ -33,10 +58,18 @@ export const ProposalModal = ({
     const [proposalType, setProposalType] = useState("Road");
     const [isConditional, setIsConditional] = useState(false);
     const [shareUpside, setShareUpside] = useState(false);
-    const [ethAmount, setEthAmount] = useState("");
-    const [cityTokenAmount, setCityTokenAmount] = useState("");
+    const [ethAmount, setEthAmount] = useState("0.001");
+    const [cityTokenAmount, setCityTokenAmount] = useState("42");
     const [isLoading, setIsLoading] = useState(false);
     const [imagePreviewUrl, setImagePreviewUrl] = useState<string>("");
+
+    // Update name and description when type changes
+    useEffect(() => {
+        if (showProposalModal) {
+            setProposalName(generateRandomName(proposalType));
+            setProposalDescription(generateDescription(proposalType));
+        }
+    }, [proposalType, showProposalModal]);
 
     // First, approve the CityToken if needed
     const { writeContractAsync: approveCityToken } = useScaffoldWriteContract({

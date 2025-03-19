@@ -5,11 +5,18 @@ const readline = require('readline');
 // load .env file from parent directory
 require('dotenv').config({ path: '../.env' });
 
-// Updated ABI to include only the mint function
+// Updated ABI to include the mint function and custom errors
 const PARCEL_NFT_ABI = [
     "function mint(address to, uint256 osmId) public returns (uint256)",
     "function mintBatch(address to, uint256[] calldata osmIds) public returns (uint256[] memory)",
-    "function ownerOf(uint256 tokenId) public view returns (address)"
+    "function ownerOf(uint256 tokenId) public view returns (address)",
+    // OpenZeppelin ERC721 custom errors
+    "error ERC721NonexistentToken(uint256 tokenId)",
+    "error ERC721InvalidTokenId(uint256 tokenId)",
+    "error ERC721InvalidOwner(address owner)",
+    // ParcelNFT custom errors
+    "error ParcelNFT_TokenIdAlreadyMinted(uint256 tokenId)",
+    "error ParcelNFT_ParcelDoesNotExist(uint256 tokenId)"
 ];
 
 // Configuration
@@ -25,7 +32,6 @@ const BLOCK_EXPLORER_URL = process.env.BLOCK_EXPLORER_URL;
 
 // Batch size for concurrent processing
 const BATCH_SIZE = 20;
-const CONCURRENT_BATCHES = 3;
 const RETRY_DELAY = 2000; // 2 seconds
 const MAX_RETRIES = 3;
 
@@ -83,28 +89,43 @@ function pickAnAddress() {
 }
 
 function chunkArray(array, size) {
-    const chunks = [];
-    for (let i = 0; i < array.length; i += size) {
-        chunks.push(array.slice(i, i + size));
-    }
+    // Create a copy of the array to shuffle
+    const shuffled = [...array].sort(() => Math.random() - 0.5);
+
+    // Initialize empty chunks
+    const chunks = Array.from({ length: Math.ceil(array.length / size) }, () => []);
+
+    // Distribute elements to chunks round-robin style
+    shuffled.forEach((item, index) => {
+        const chunkIndex = index % chunks.length;
+        chunks[chunkIndex].push(item);
+    });
+
     return chunks;
 }
 
 async function checkParcelOwnership(contract, osmId) {
     try {
-        await contract.ownerOf(osmId);
-        return true; // Parcel is already minted
+        const owner = await contract.ownerOf(osmId);
+        // console.log(`Owner found: ${owner}`);
+        return true;
     } catch (error) {
-        if (error.message.includes("ERC721: invalid token ID") ||
-            error.message.includes("owner query for nonexistent token")) {
-            return false; // Parcel is not minted
+        // if the error is ERC721NonexistentToken, return false
+        if (error.message.includes("ERC721NonexistentToken")) {
+            // console.log(`Parcel ${osmId} has not been minted yet`);
+            return false;
         }
-        throw error; // Unexpected error
+        console.log(`Error checking ownership for parcel ${osmId}:`, {
+            errorCode: error.code,
+            errorMessage: error.message,
+            errorName: error.name,
+            customError: error.data?.message
+        });
+        throw error; // Let's see the full error
     }
 }
 
 async function filterUnmintedParcels(contract, buildings) {
-    console.log('\nChecking ownership status of parcels...');
     const unminted = [];
     const minted = [];
 
@@ -119,27 +140,45 @@ async function filterUnmintedParcels(contract, buildings) {
     }
 
     if (minted.length > 0) {
-        console.log(`\nSkipping ${minted.length} already minted parcels:`, minted);
+        // console.log(`\nSkipping ${minted.length} already minted parcels:`);
+        // console.log(minted);
     }
-    console.log(`Found ${unminted.length} unminted parcels to process`);
+    // console.log(`Found ${unminted.length} unminted parcels to process`);
 
     return unminted;
 }
 
 async function processBatch(contract, buildings, wallet, batchIndex) {
+    const prefix = `\n[Batch ${batchIndex + 1}]`;
+    console.log(prefix, 'Checking ownership status of parcels...');
+
     // First filter out already minted parcels
-    const unmintedBuildings = await filterUnmintedParcels(contract, buildings);
+    const unmintedBuildings = [];
+    for (const building of buildings) {
+        try {
+            const osmId = BigInt(building.id);
+            // console.log(`\nChecking parcel: ${building.id}`);
+            const isMinted = await checkParcelOwnership(contract, osmId);
+            if (!isMinted) {
+                unmintedBuildings.push(building);
+            }
+        } catch (error) {
+            console.error(`Error processing building ${building.id}:`, error);
+            // Continue with next building
+        }
+    }
 
     if (unmintedBuildings.length === 0) {
-        console.log(`\nSkipping batch ${batchIndex + 1} - all parcels already minted`);
+        console.log(prefix, 'Skipping batch - all parcels already minted or errored');
         return true;
     }
 
-    const address = pickAnAddress(); // Only pick one address for the entire batch
+    const address = pickAnAddress();
     const osmIds = unmintedBuildings.map(b => BigInt(b.id));
 
-    console.log(`\nProcessing batch ${batchIndex + 1} with ${unmintedBuildings.length} unminted buildings`);
-    console.log(`Minting to address: ${address}`);
+    console.log(prefix, `Processing batch ${batchIndex + 1} with ${unmintedBuildings.length} unminted buildings`);
+    console.log(prefix, `Minting to address: ${address}`);
+    // console.log('OSM IDs to mint:', osmIds.map(id => id.toString()));
 
     let retries = 0;
     while (retries < MAX_RETRIES) {
@@ -147,25 +186,31 @@ async function processBatch(contract, buildings, wallet, batchIndex) {
             const nonce = await wallet.getNonce();
             const gasPrice = await wallet.provider.getFeeData();
 
-            // Use EIP-1559 transaction format for better gas optimization
+            // console.log('Attempting mintBatch with params:', {
+            //     to: address,
+            //     osmIds: osmIds.map(id => id.toString()),
+            //     nonce,
+            //     maxFeePerGas: gasPrice.maxFeePerGas?.toString(),
+            //     maxPriorityFeePerGas: gasPrice.maxPriorityFeePerGas?.toString()
+            // });
+
             const tx = await contract.mintBatch(address, osmIds, {
                 nonce,
                 maxFeePerGas: gasPrice.maxFeePerGas,
                 maxPriorityFeePerGas: gasPrice.maxPriorityFeePerGas,
             });
 
-            console.log(`Batch ${batchIndex + 1} transaction submitted: ${BLOCK_EXPLORER_URL}${tx.hash}`);
+            console.log(prefix, `Transaction submitted: ${BLOCK_EXPLORER_URL}${tx.hash}`);
 
             const receipt = await tx.wait();
-            console.log(`✅ Batch ${batchIndex + 1} minted - Block: ${receipt.blockNumber}`);
+            console.log(prefix, `✅ Minted - Block: ${receipt.blockNumber}`);
             return true;
         } catch (error) {
             // Check for "not enough funds" error
             if ((error.error?.code == -32000) ||
                 JSON.stringify(error).includes('Sender doesn\'t have enough funds to send tx')) {
                 console.error('\n❌ ERROR: Not enough funds to process transaction');
-                console.error('Error details:', error.data?.message || error.message);
-                // Exit the process entirely
+                // console.error('Error details:', error.data?.message || error.message);
                 process.exit(1);
             }
 
@@ -275,17 +320,14 @@ async function mintParcelNFTs(buildings) {
 
     // Check if contract supports batch minting
     const supportsBatchMinting = await checkBatchMintingSupport(contract);
-
     if (!supportsBatchMinting) {
         // Ask user whether to continue with single mints
         console.log('\n⚠️  This will process each mint individually, which will be slower and more expensive.');
         const answer = await promptUser('Do you want to continue with single minting? (Y/N): ');
-
         if (answer !== 'y') {
             console.log('\n❌ Minting process cancelled by user');
             process.exit(0);
         }
-
         // Fall back to single mints
         await mintParcelNFTsSingle(contract, buildings, wallet);
         return;
@@ -293,22 +335,16 @@ async function mintParcelNFTs(buildings) {
 
     // Proceed with batch minting
     console.log('\n🚀 Contract supports batch minting. Proceeding with batched operations...');
-
     // Split buildings into batches
     const batches = chunkArray(buildings, BATCH_SIZE);
     console.log(`Split into ${batches.length} batches of up to ${BATCH_SIZE} buildings each`);
 
-    // Process batches with concurrency control
-    for (let i = 0; i < batches.length; i += CONCURRENT_BATCHES) {
-        const currentBatches = batches.slice(i, i + CONCURRENT_BATCHES);
-        const promises = currentBatches.map((batch, index) =>
-            processBatch(contract, batch, wallet, i + index)
-        );
+    // Process batches sequentially
+    for (let i = 0; i < batches.length; i++) {
+        await processBatch(contract, batches[i], wallet, i);
 
-        await Promise.all(promises);
-
-        // Add delay between concurrent batch groups if not on localhost
-        if (!RPC_URL.includes('localhost') && i + CONCURRENT_BATCHES < batches.length) {
+        // Add delay between batches if not on localhost
+        if (!RPC_URL.includes('localhost') && i < batches.length - 1) {
             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
         }
     }
@@ -335,7 +371,8 @@ async function main() {
 
         console.log("\n✨ All done!");
     } catch (error) {
-        console.error("\n❌ Error:", error.message);
+        console.error("\n❌ Minting error:", error.message);
+        console.error('Error details:', error);
         process.exit(1);
     }
 }

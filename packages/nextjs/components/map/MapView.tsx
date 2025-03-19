@@ -120,8 +120,8 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze, selectedParcelId
             const isSelected = selectedParcelIds.includes(parcelId);
             const isHighlighted = highlightedParcelIds.includes(parcelId);
             polygon.setStyle({
-                fillColor: isHighlighted ? '#FF4500' : isSelected ? '#FFD700' : '#000000',
-                color: isHighlighted ? '#FF4500' : isSelected ? '#FFD700' : '#000000',
+                fillColor: isHighlighted ? '#90EE90' : isSelected ? '#FFD700' : '#000000',
+                color: isHighlighted ? '#90EE90' : isSelected ? '#FFD700' : '#000000',
                 weight: isHighlighted ? 2 : 1,
                 opacity: isHighlighted ? 0.8 : 0.5,
                 fillOpacity: isHighlighted ? 0.5 : 0.3
@@ -299,8 +299,8 @@ const MapView: FC<MapViewProps> = ({ onParcelSelect, onAnalyze, selectedParcelId
                             const isSelected = selectedParcelIds.includes(parcel.id);
                             const isHighlighted = highlightedParcelIds.includes(parcel.id);
                             const polygon = L.polygon(coordinates, {
-                                fillColor: isHighlighted ? '#FF4500' : isSelected ? '#FFD700' : '#000000',
-                                color: isHighlighted ? '#FF4500' : isSelected ? '#FFD700' : '#000000',
+                                fillColor: isHighlighted ? '#90EE90' : isSelected ? '#FFD700' : '#000000',
+                                color: isHighlighted ? '#90EE90' : isSelected ? '#FFD700' : '#000000',
                                 weight: isHighlighted ? 2 : 1,
                                 opacity: isHighlighted ? 0.8 : 0.5,
                                 fillOpacity: isHighlighted ? 0.5 : 0.3

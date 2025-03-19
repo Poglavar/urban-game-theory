@@ -1,6 +1,7 @@
 const { ethers } = require('ethers');
 const fetch = require('node-fetch');
 const fs = require('fs');
+const FormData = require('form-data');
 require('dotenv').config({ path: '../.env' });
 
 // Contract ABIs
@@ -27,6 +28,8 @@ const DEPLOYER_ADDRESS = process.env.DEPLOYER_ADDRESS;
 const PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY;
 const RPC_URL = process.env.RPC_URL;
 const BLOCK_EXPLORER_URL = process.env.BLOCK_EXPLORER_URL;
+const PINATA_API_KEY = process.env.PINATA_API_KEY;
+const PINATA_API_SECRET = process.env.PINATA_API_SECRET;
 
 // Helper function to get random number in range (inclusive)
 function getRandomInt(min, max) {
@@ -51,6 +54,78 @@ function getRandomEthAmount() {
 // Helper function to get random token amount (between 1 and 10 tokens)
 function getRandomTokenAmount() {
     return ethers.parseUnits(getRandomInt(1, 10).toString(), 18);
+}
+
+// Helper function to generate random proposal name
+function generateRandomName(type) {
+    const adjectives = ['New', 'Modern', 'Green', 'Urban', 'Smart', 'Sustainable'];
+    const nouns = ['Development', 'Project', 'Initiative', 'Plan', 'Proposal'];
+    return `${adjectives[getRandomInt(0, adjectives.length - 1)]} ${type} ${nouns[getRandomInt(0, nouns.length - 1)]}`;
+}
+
+// Helper function to generate description
+function generateDescription(type) {
+    const descriptions = {
+        'Road': 'A new road development project to improve connectivity and traffic flow.',
+        'Park': 'A green space development project to enhance community well-being.',
+        'Square': 'A public square development to create a vibrant community space.',
+        'Buildings': 'A modern building development project for mixed-use purposes.',
+        'Mixed': 'A comprehensive development project combining multiple urban elements.'
+    };
+    return descriptions[type] || 'A new urban development proposal.';
+}
+
+// Function to upload image to IPFS via Pinata
+async function uploadImageToPinata(imageData, name) {
+    if (!PINATA_API_KEY || !PINATA_API_SECRET) {
+        throw new Error('Pinata API key or secret not found. Please check your .env file');
+    }
+
+    const response = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/octet-stream',
+            'pinata_api_key': PINATA_API_KEY,
+            'pinata_secret_api_key': PINATA_API_SECRET,
+        },
+        body: imageData
+    });
+
+    if (!response.ok) {
+        throw new Error('Failed to upload image to Pinata');
+    }
+
+    const result = await response.json();
+    return `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`;
+}
+
+// Function to upload metadata to IPFS via Pinata
+async function uploadMetadataToPinata(metadata, name) {
+    if (!PINATA_API_KEY || !PINATA_API_SECRET) {
+        throw new Error('Pinata API key or secret not found. Please check your .env file');
+    }
+
+    const response = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'pinata_api_key': PINATA_API_KEY,
+            'pinata_secret_api_key': PINATA_API_SECRET,
+        },
+        body: JSON.stringify({
+            pinataContent: metadata,
+            pinataMetadata: {
+                name: `${name}-metadata.json`
+            }
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error('Failed to upload metadata to Pinata');
+    }
+
+    const result = await response.json();
+    return `ipfs://${result.IpfsHash}`;
 }
 
 // Calculate bounding box for the given zoom level
@@ -155,11 +230,54 @@ async function mintProposal(contract, cityTokenContract, buildings, proposalInde
         const ethAmount = getRandomEthAmount();
         const tokenAmount = getRandomTokenAmount();
 
+        // Generate random proposal type and details
+        const proposalTypes = ['Road', 'Park', 'Square', 'Buildings', 'Mixed'];
+        const proposalType = proposalTypes[getRandomInt(0, proposalTypes.length - 1)];
+        const proposalName = generateRandomName(proposalType);
+        const proposalDescription = generateDescription(proposalType);
+
         console.log(`\nMinting proposal ${proposalIndex + 1}/${NUM_PROPOSALS}`);
+        console.log(`Name: ${proposalName}`);
+        console.log(`Type: ${proposalType}`);
+        console.log(`Description: ${proposalDescription}`);
         console.log(`Parcels: ${parcelIds.join(', ')}`);
         console.log(`Conditional: ${isConditional}`);
         console.log(`ETH Amount: ${ethers.formatEther(ethAmount)} ETH`);
         console.log(`Token Amount: ${ethers.formatEther(tokenAmount)} CITY`);
+
+        // Generate a simple image for the proposal (in real app this would be a map screenshot)
+        const imageData = Buffer.from('Sample image data');
+        console.log('\nUploading image to IPFS...');
+        const imageUrl = await uploadImageToPinata(imageData, proposalName);
+        console.log('Image uploaded:', imageUrl);
+
+        // Create and upload metadata
+        const metadata = {
+            name: proposalName,
+            description: proposalDescription,
+            type: proposalType,
+            image: imageUrl,
+            image_url: imageUrl,
+            external_url: imageUrl,
+            attributes: [
+                {
+                    trait_type: "Proposal Type",
+                    value: proposalType
+                },
+                {
+                    trait_type: "Conditional",
+                    value: isConditional ? "Yes" : "No"
+                },
+                {
+                    trait_type: "Parcels",
+                    value: parcelIds.length.toString()
+                }
+            ]
+        };
+
+        console.log('\nUploading metadata to IPFS...');
+        const ipfsUrl = await uploadMetadataToPinata(metadata, proposalName);
+        console.log('Metadata uploaded:', ipfsUrl);
 
         // First approve tokens if needed
         if (tokenAmount > 0n) {
@@ -175,7 +293,7 @@ async function mintProposal(contract, cityTokenContract, buildings, proposalInde
             DEPLOYER_ADDRESS,
             parcelIds,
             isConditional,
-            "https://test.com/img.jpg",
+            ipfsUrl,
             ethAmount,
             tokenAmount,
             { value: ethAmount }

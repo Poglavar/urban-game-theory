@@ -84,6 +84,8 @@ const ControlsPanel = React.memo(({
   onLoadProposals,
   onShowMemeToken,
   isLoadingProposals,
+  onHighlightMyParcels,
+  isHighlightingParcels,
 }: {
   isAnalyzingParcels: boolean;
   setIsAnalyzingParcels: (value: boolean) => void;
@@ -92,6 +94,8 @@ const ControlsPanel = React.memo(({
   onLoadProposals: () => void;
   onShowMemeToken: () => void;
   isLoadingProposals: boolean;
+  onHighlightMyParcels: () => void;
+  isHighlightingParcels: boolean;
 }) => {
   return (
     <div className="p-4">
@@ -124,15 +128,16 @@ const ControlsPanel = React.memo(({
             onClick={onLoadProposals}
             disabled={isLoadingProposals}
           >
-            {isLoadingProposals ? (
-              <>
-                <span className="inline-block animate-bounce">⬇</span>
-                <span>Loading Proposals</span>
-                <span className="inline-block animate-bounce" style={{ animationDelay: '0.2s' }}>⬇</span>
-              </>
-            ) : (
-              'Load All Proposals'
-            )}
+            {isLoadingProposals ? 'Loading...' : 'Load All Proposals'}
+          </button>
+        </div>
+        <div>
+          <button
+            className="btn w-full bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300"
+            onClick={onHighlightMyParcels}
+            disabled={isHighlightingParcels}
+          >
+            {isHighlightingParcels ? 'Loading...' : 'Highlight My Parcels'}
           </button>
         </div>
         <div>
@@ -713,36 +718,50 @@ const ProposalsPanel = React.memo(({ proposals, loadAllProposals, nativeCurrency
                         </button>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm">
-                      <div className="flex gap-2">
-                        <span className="text-base-content/70">Parcels:</span>
-                        <span className="font-medium">{proposal.parcelIds.length}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-base-content/70">Progress:</span>
-                        <div className="flex gap-1 items-center">
-                          {[...Array(proposal.parcelIds.length)].map((_, index) => (
-                            <div
-                              key={index}
-                              className={`w-2 h-2 rounded-full ${index < (proposal.acceptanceCount || 0)
-                                ? "bg-success"
-                                : "border border-base-content/30"
-                                }`}
-                            />
-                          ))}
+                    <div className="flex justify-between gap-4">
+                      <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm flex-1">
+                        <div className="flex gap-2">
+                          <span className="text-base-content/70">Parcels:</span>
+                          <span className="font-medium">{proposal.parcelIds.length}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-base-content/70">Progress:</span>
+                          <div className="flex gap-1 items-center">
+                            {[...Array(proposal.parcelIds.length)].map((_, index) => (
+                              <div
+                                key={index}
+                                className={`w-2 h-2 rounded-full ${index < (proposal.acceptanceCount || 0)
+                                  ? "bg-success"
+                                  : "border border-base-content/30"
+                                  }`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <span className="text-base-content/70">Status:</span>
+                          <span className="text-success">Active</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <span className="text-base-content/70">Conditional:</span>
+                          <span>{proposal.metadata.attributes.find(attr => attr.trait_type === "Conditional")?.value || "No"}</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <span className="text-base-content/70">Share Upside:</span>
+                          <span>{proposal.metadata.attributes.find(attr => attr.trait_type === "Share Upside")?.value || "No"}</span>
                         </div>
                       </div>
-                      <div className="flex gap-2">
-                        <span className="text-base-content/70">Status:</span>
-                        <span className="text-success">Active</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <span className="text-base-content/70">Conditional:</span>
-                        <span>{proposal.metadata.attributes.find(attr => attr.trait_type === "Conditional")?.value || "No"}</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <span className="text-base-content/70">Share Upside:</span>
-                        <span>{proposal.metadata.attributes.find(attr => attr.trait_type === "Share Upside")?.value || "No"}</span>
+                      <div className="w-32 h-32 rounded-lg overflow-hidden border border-base-300 flex-shrink-0">
+                        <img
+                          src={proposal.metadata.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/')}
+                          alt={proposal.metadata.name}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.src = '/placeholder-image.png'; // You should add a placeholder image to your public folder
+                            target.onerror = null; // Prevent infinite loop if placeholder also fails
+                          }}
+                        />
                       </div>
                     </div>
                     {canAcceptProposal(proposal) && (
@@ -805,6 +824,7 @@ export default function Home() {
   const [proposals, setProposals] = useState<ProposalData[]>([]);
   const [filteredProposals, setFilteredProposals] = useState<ProposalData[]>([]);
   const [showDonationModal, setShowDonationModal] = useState(false);
+  const [isHighlightingParcels, setIsHighlightingParcels] = useState(false);
 
   const { writeContractAsync: writeProposalNFT } = useScaffoldWriteContract({
     contractName: "ProposalNFT",
@@ -998,6 +1018,39 @@ export default function Home() {
     setShowMemeTokenModal(true);
   }, []);
 
+  const handleHighlightMyParcels = useCallback(async () => {
+    if (!parcelNFTContract || !address) {
+      notification.error("Please connect your wallet first");
+      return;
+    }
+
+    setIsHighlightingParcels(true);
+    try {
+      // Get the number of parcels owned by the address
+      const balance = await parcelNFTContract.read.balanceOf([address]);
+      const ownedParcelIds: string[] = [];
+
+      // Fetch all owned parcel IDs
+      for (let i = 0; i < Number(balance); i++) {
+        try {
+          const tokenId = await parcelNFTContract.read.tokenOfOwnerByIndex([address, BigInt(i)]);
+          ownedParcelIds.push(tokenId.toString());
+        } catch (error) {
+          console.error(`Error fetching token at index ${i}:`, error);
+        }
+      }
+
+      // Update highlighted parcels
+      setHighlightedParcelIds(ownedParcelIds);
+      notification.success(`Found ${ownedParcelIds.length} parcels`);
+    } catch (error) {
+      console.error("Error highlighting owned parcels:", error);
+      notification.error("Failed to highlight owned parcels");
+    } finally {
+      setIsHighlightingParcels(false);
+    }
+  }, [parcelNFTContract, address]);
+
   const contextValue = {
     selectedParcels,
     selectedMyParcel,
@@ -1038,6 +1091,8 @@ export default function Home() {
             onLoadProposals={loadAllProposals}
             onShowMemeToken={handleShowMemeToken}
             isLoadingProposals={isLoadingProposals}
+            onHighlightMyParcels={handleHighlightMyParcels}
+            isHighlightingParcels={isHighlightingParcels}
           />
         </div>
 
