@@ -21,4 +21,9 @@ export interface Proposal {
     imageURI: string;
     proposer: string;
     isActive: boolean;
+}
+
+export interface SelectedParcel {
+  id: string;
+  // Add any other properties that might be needed for selected parcels
 } 
