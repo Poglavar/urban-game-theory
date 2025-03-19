@@ -1,6 +1,6 @@
 import { HardhatRuntimeEnvironment } from "hardhat/types";
 import { DeployFunction } from "hardhat-deploy/types";
-
+import fs from "fs";
 const deployProposalNFT: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const { deployer } = await hre.getNamedAccounts();
   const { deploy, get } = hre.deployments;
@@ -17,6 +17,8 @@ const deployProposalNFT: DeployFunction = async function (hre: HardhatRuntimeEnv
   });
 
   console.log(`ProposalNFT deployed to: ${proposalNFT.address}`);
+  // write the address to the .env file
+  fs.writeFileSync(".env.proposalNFT.address", proposalNFT.address);
 };
 
 export default deployProposalNFT;

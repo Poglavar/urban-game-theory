@@ -16,6 +16,7 @@ import React from "react";
 import { formatEther, parseEther, parseUnits } from "viem";
 import { ProposalModal } from "~~/components/modals/ProposalModal";
 import { MemeTokenModal } from "~~/components/modals/MemeTokenModal";
+import { DonationModal } from "~~/components/modals/DonationModal";
 
 // Extend Window interface to include analyzeArea
 declare global {
@@ -561,6 +562,7 @@ const ProposalsPanel = React.memo(({ proposals, loadAllProposals, nativeCurrency
     contractName: "ProposalNFT",
   }) as { data: Contract<any> | null };
   const { address } = useAccount();
+  const [showDonationModal, setShowDonationModal] = useState(false);
 
   const handleAcceptProposal = async (proposalId: bigint, parcelId: string | null) => {
     if (!parcelId) {
@@ -702,11 +704,16 @@ const ProposalsPanel = React.memo(({ proposals, loadAllProposals, nativeCurrency
       return;
     }
 
+    if (!selectedProposal) {
+      notification.error("No proposal selected");
+      return;
+    }
+
     try {
       notification.info("Processing donation...");
       const tx = await writeProposalNFT({
         functionName: "depositFunds",
-        args: [selectedProposal?.tokenId],
+        args: [selectedProposal.tokenId],
         value: parseEther("0.1"), // Default donation of 0.1 ETH
       });
       await tx;
@@ -728,88 +735,92 @@ const ProposalsPanel = React.memo(({ proposals, loadAllProposals, nativeCurrency
             {sortedProposals.map((proposal) => (
               <div
                 key={proposal.tokenId.toString()}
-                className="card bg-base-100 shadow-xl cursor-pointer hover:bg-opacity-70 transition-colors"
+                className={`card bg-base-100 shadow-xl cursor-pointer hover:bg-opacity-70 transition-all transform ${selectedProposal?.tokenId === proposal.tokenId
+                  ? "border-2 border-primary scale-[0.99] shadow-lg bg-base-200"
+                  : "hover:scale-[1.01] hover:shadow-2xl"
+                  }`}
                 onClick={() => handleProposalClick(proposal)}
               >
-                <div className="card-body p-4">
-                  <div className="flex items-start justify-between gap-2 mb-0.5">
-                    <div className="flex items-center gap-2">
-                      <h3 className="card-title text-lg">{proposal.metadata.name}</h3>
-                      <span className={`badge ${proposal.metadata.type === "Road" ? "bg-amber-200 text-amber-800 border-amber-300" :
-                        proposal.metadata.type === "Park" ? "bg-emerald-200 text-emerald-800 border-emerald-300" :
-                          proposal.metadata.type === "Square" ? "bg-slate-100 text-slate-800 border-slate-200" :
-                            proposal.metadata.type === "Buildings" ? "bg-zinc-300 text-zinc-800 border-zinc-400" :
-                              "badge-accent"
-                        }`}>{proposal.metadata.type}</span>
-                    </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <div className="badge badge-lg bg-success/10 text-success border-success/20">
-                        ${calculateBudget(proposal.ethAmount, proposal.tokenAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                      <button
-                        className="btn btn-xs btn-outline btn-success"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDonate();
-                        }}
-                      >
-                        Donate to budget
-                      </button>
-                    </div>
-                  </div>
-                  <p className="text-sm text-base-content/70 mb-2">{proposal.metadata.description}</p>
-                  <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm">
-                    <div className="flex gap-2">
-                      <span className="text-base-content/70">Parcels:</span>
-                      <span className="font-medium">{proposal.parcelIds.length}</span>
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <span className="text-base-content/70">Progress:</span>
-                      <div className="flex gap-1 items-center">
-                        {[...Array(proposal.parcelIds.length)].map((_, index) => (
-                          <div
-                            key={index}
-                            className={`w-2 h-2 rounded-full ${index < (proposal.acceptanceCount || 0)
-                              ? "bg-success"
-                              : "border border-base-content/30"
-                              }`}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <span className="text-base-content/70">Status:</span>
-                      <span className="text-success">Active</span>
-                    </div>
-                    <div className="flex gap-2">
-                      <span className="text-base-content/70">Conditional:</span>
-                      <span>{proposal.metadata.attributes.find(attr => attr.trait_type === "Conditional")?.value || "No"}</span>
-                    </div>
-                    <div className="flex gap-2">
-                      <span className="text-base-content/70">Share Upside:</span>
-                      <span>{proposal.metadata.attributes.find(attr => attr.trait_type === "Share Upside")?.value || "No"}</span>
-                    </div>
-                  </div>
-                  {canAcceptProposal(proposal) && (
-                    <div className="mt-4 flex justify-end" onClick={(e) => e.stopPropagation()}>
-                      {acceptedProposals[proposal.tokenId.toString()] ? (
-                        <div className="badge badge-success gap-2 p-4">
-                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="inline-block w-4 h-4 stroke-current"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
-                          Accepted
+                <div className={`card-body p-4 ${selectedProposal?.tokenId === proposal.tokenId ? "opacity-100" : "opacity-90"}`}>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <h3 className="card-title text-lg">{proposal.metadata.name}</h3>
+                          <span className={`badge ${proposal.metadata.type === "Road" ? "bg-amber-200 text-amber-800 border-amber-300" :
+                            proposal.metadata.type === "Park" ? "bg-emerald-200 text-emerald-800 border-emerald-300" :
+                              proposal.metadata.type === "Square" ? "bg-slate-100 text-slate-800 border-slate-200" :
+                                proposal.metadata.type === "Buildings" ? "bg-zinc-300 text-zinc-800 border-zinc-400" :
+                                  "badge-accent"
+                            }`}>{proposal.metadata.type}</span>
                         </div>
-                      ) : (
+                        <p className="text-sm text-base-content/70">{proposal.metadata.description}</p>
+                      </div>
+                      <div className="flex flex-col items-end gap-2 min-w-fit">
+                        <div className="badge badge-lg bg-success/10 text-success border-success/20">
+                          ${calculateBudget(proposal.ethAmount, proposal.tokenAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
                         <button
-                          className="btn btn-primary btn-sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleAcceptProposal(proposal.tokenId, selectedMyParcel);
-                          }}
+                          className="btn btn-sm btn-primary"
+                          onClick={() => setShowDonationModal(true)}
                         >
-                          Accept Proposal
+                          Donate to budget
                         </button>
-                      )}
+                      </div>
                     </div>
-                  )}
+                    <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm">
+                      <div className="flex gap-2">
+                        <span className="text-base-content/70">Parcels:</span>
+                        <span className="font-medium">{proposal.parcelIds.length}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-base-content/70">Progress:</span>
+                        <div className="flex gap-1 items-center">
+                          {[...Array(proposal.parcelIds.length)].map((_, index) => (
+                            <div
+                              key={index}
+                              className={`w-2 h-2 rounded-full ${index < (proposal.acceptanceCount || 0)
+                                ? "bg-success"
+                                : "border border-base-content/30"
+                                }`}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <span className="text-base-content/70">Status:</span>
+                        <span className="text-success">Active</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <span className="text-base-content/70">Conditional:</span>
+                        <span>{proposal.metadata.attributes.find(attr => attr.trait_type === "Conditional")?.value || "No"}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <span className="text-base-content/70">Share Upside:</span>
+                        <span>{proposal.metadata.attributes.find(attr => attr.trait_type === "Share Upside")?.value || "No"}</span>
+                      </div>
+                    </div>
+                    {canAcceptProposal(proposal) && (
+                      <div className="mt-4 flex justify-end" onClick={(e) => e.stopPropagation()}>
+                        {acceptedProposals[proposal.tokenId.toString()] ? (
+                          <div className="badge badge-success gap-2 p-4">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="inline-block w-4 h-4 stroke-current"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
+                            Accepted
+                          </div>
+                        ) : (
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAcceptProposal(proposal.tokenId, selectedMyParcel);
+                            }}
+                          >
+                            Accept Proposal
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -820,6 +831,13 @@ const ProposalsPanel = React.memo(({ proposals, loadAllProposals, nativeCurrency
           </div>
         )}
       </div>
+      {showDonationModal && (
+        <DonationModal
+          proposal={selectedProposal}
+          isOpen={showDonationModal}
+          onClose={() => setShowDonationModal(false)}
+        />
+      )}
     </div>
   );
 });
@@ -841,6 +859,7 @@ export default function Home() {
   const [highlightedParcelIds, setHighlightedParcelIds] = useState<string[]>([]);
   const [proposals, setProposals] = useState<ProposalData[]>([]);
   const [filteredProposals, setFilteredProposals] = useState<ProposalData[]>([]);
+  const [showDonationModal, setShowDonationModal] = useState(false);
 
   const { writeContractAsync: writeProposalNFT } = useScaffoldWriteContract({
     contractName: "ProposalNFT",

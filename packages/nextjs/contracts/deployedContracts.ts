@@ -835,6 +835,30 @@ const deployedContracts = {
           type: "function",
         },
         {
+          inputs: [
+            {
+              internalType: "address",
+              name: "to",
+              type: "address",
+            },
+            {
+              internalType: "uint256[]",
+              name: "osmIds",
+              type: "uint256[]",
+            },
+          ],
+          name: "mintBatch",
+          outputs: [
+            {
+              internalType: "uint256[]",
+              name: "",
+              type: "uint256[]",
+            },
+          ],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+        {
           inputs: [],
           name: "name",
           outputs: [
@@ -1154,7 +1178,7 @@ const deployedContracts = {
       },
     },
     ProposalNFT: {
-      address: "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
+      address: "0x9A676e781A523b5d0C0e43731313A708CB607508",
       abi: [
         {
           inputs: [
@@ -1379,18 +1403,18 @@ const deployedContracts = {
             },
             {
               indexed: false,
-              internalType: "uint256",
-              name: "ethAmount",
-              type: "uint256",
+              internalType: "address",
+              name: "tokenAddress",
+              type: "address",
             },
             {
               indexed: false,
               internalType: "uint256",
-              name: "tokenAmount",
+              name: "amount",
               type: "uint256",
             },
           ],
-          name: "FundsDeposited",
+          name: "FundsContributed",
           type: "event",
         },
         {
@@ -1558,14 +1582,14 @@ const deployedContracts = {
         {
           inputs: [
             {
-              internalType: "address",
-              name: "tokenAddress",
-              type: "address",
-            },
-            {
               internalType: "uint256",
               name: "proposalId",
               type: "uint256",
+            },
+            {
+              internalType: "address",
+              name: "tokenAddress",
+              type: "address",
             },
             {
               internalType: "uint256",
@@ -1573,20 +1597,7 @@ const deployedContracts = {
               type: "uint256",
             },
           ],
-          name: "depositERC20",
-          outputs: [],
-          stateMutability: "nonpayable",
-          type: "function",
-        },
-        {
-          inputs: [
-            {
-              internalType: "uint256",
-              name: "proposalId",
-              type: "uint256",
-            },
-          ],
-          name: "depositFunds",
+          name: "contributeFunds",
           outputs: [],
           stateMutability: "payable",
           type: "function",

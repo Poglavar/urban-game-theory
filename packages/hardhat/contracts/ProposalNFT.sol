@@ -25,7 +25,7 @@ contract ProposalNFT is ERC721Enumerable, Ownable {
     uint256 private _tokenIdCounter;
 
     event ProposalAccepted(uint256 indexed proposalId, string parcelId, address owner);
-    event FundsDeposited(uint256 indexed proposalId, uint256 ethAmount, uint256 tokenAmount);
+    event FundsContributed(uint256 indexed proposalId, address tokenAddress, uint256 amount);
     event FundsDistributed(uint256 indexed proposalId, uint256 ethAmount, uint256 tokenAmount);
 
     constructor(address _parcelNFTAddress, address _cityTokenAddress)
@@ -119,26 +119,25 @@ contract ProposalNFT is ERC721Enumerable, Ownable {
         return result;
     }
 
-    function depositFunds(uint256 proposalId) public payable {
+    // Function allowing anyone to contribute funds to a proposal.
+    // tokenAddress can be 0 for ETH contribution or an ERC20 token address.
+    function contributeFunds(uint256 proposalId, address tokenAddress, uint256 amount) public payable {
         require(_ownerOf(proposalId) != address(0), "ProposalNFT: Proposal does not exist");
         require(proposals[proposalId].isActive, "ProposalNFT: Proposal is not active");
-        require(msg.sender == ownerOf(proposalId), "ProposalNFT: Not proposal owner");
 
-        uint256 tokenAmount = cityToken.allowance(msg.sender, address(this));
-        require(tokenAmount > 0 || msg.value > 0, "ProposalNFT: No funds to deposit");
-
-        if (tokenAmount > 0) {
+        if (tokenAddress != address(0)) {
+            // We are dealing with an ERC20 token
             require(
-                cityToken.transferFrom(msg.sender, address(this), tokenAmount), "ProposalNFT: Token transfer failed"
+                IERC20(tokenAddress).transferFrom(msg.sender, address(this), amount),
+                "ProposalNFT: Token transfer failed"
             );
-            proposals[proposalId].tokenBalance += tokenAmount;
+        } else {
+            // We are dealing with ETH
+            require(msg.value == amount, "ProposalNFT: ETH amount mismatch");
+            proposals[proposalId].ethBalance += amount;
         }
 
-        if (msg.value > 0) {
-            proposals[proposalId].ethBalance += msg.value;
-        }
-
-        emit FundsDeposited(proposalId, msg.value, tokenAmount);
+        emit FundsContributed(proposalId, tokenAddress, amount);
     }
 
     function distributeFunds(uint256 proposalId) public {
@@ -222,26 +221,5 @@ contract ProposalNFT is ERC721Enumerable, Ownable {
 
     function supportsInterface(bytes4 interfaceId) public view virtual override(ERC721Enumerable) returns (bool) {
         return super.supportsInterface(interfaceId);
-    }
-
-    function depositERC20(address tokenAddress, uint256 proposalId, uint256 amount) public {
-        require(_ownerOf(proposalId) != address(0), "ProposalNFT: Proposal does not exist");
-        require(proposals[proposalId].isActive, "ProposalNFT: Proposal is not active");
-        require(amount > 0, "ProposalNFT: Amount must be greater than 0");
-        require(
-            IERC20(tokenAddress).allowance(msg.sender, address(this)) >= amount,
-            "ProposalNFT: USDC allowance insufficient"
-        );
-
-        require(
-            IERC20(tokenAddress).transferFrom(msg.sender, address(this), amount), "ProposalNFT: USDC transfer failed"
-        );
-
-        // Convert USDC (6 decimals) to ETH equivalent (18 decimals)
-        // Assuming 1 USDC = 1 USD and using current ETH price
-        uint256 ethEquivalent = (amount * 1e18) / (2500 * 1e6); // Assuming 1 ETH = $2500 USD
-        proposals[proposalId].ethBalance += ethEquivalent;
-
-        emit FundsDeposited(proposalId, ethEquivalent, 0);
     }
 }

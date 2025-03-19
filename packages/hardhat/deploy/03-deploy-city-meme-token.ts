@@ -3,7 +3,7 @@ import { DeployFunction } from "hardhat-deploy/types";
 import { ethers } from "hardhat";
 import * as dotenv from "dotenv";
 import path from "path";
-
+import fs from "fs";
 // Load .env from parent directory
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
@@ -19,10 +19,20 @@ const deployCityMemeToken: DeployFunction = async function (hre: HardhatRuntimeE
     autoMine: true,
   });
 
+  // write the address to the .env file
+  fs.writeFileSync(".env.cityToken.address", cityMemeToken.address);
   console.log(`CityMemeToken deployed to: ${cityMemeToken.address}`);
 
   // Get contract instance
   const CityMemeToken = await ethers.getContractAt("CityMemeToken", cityMemeToken.address);
+
+  // Check if the supply has been minted
+  const supply = await CityMemeToken.MAX_SUPPLY();
+  const mintedSupply = await CityMemeToken.totalSupply();
+  if (mintedSupply >= supply) {
+    console.log("Supply has already been minted");
+    return;
+  }
 
   // Get addresses from .env
   const addresses = [];

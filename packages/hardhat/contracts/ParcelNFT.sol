@@ -25,6 +25,22 @@ contract ParcelNFT is ERC721Enumerable, Ownable {
         return osmId;
     }
 
+    function mintBatch(address to, uint256[] calldata osmIds) public returns (uint256[] memory) {
+        uint256[] memory mintedIds = new uint256[](osmIds.length);
+
+        for (uint256 i = 0; i < osmIds.length; i++) {
+            if (_ownerOf(osmIds[i]) != address(0)) {
+                revert("ParcelNFT: Token ID already minted");
+            }
+
+            _safeMint(to, osmIds[i]);
+            parcels[osmIds[i]] = Parcel(osmIds[i]);
+            mintedIds[i] = osmIds[i];
+        }
+
+        return mintedIds;
+    }
+
     function getParcel(uint256 tokenId) public view returns (Parcel memory) {
         if (_ownerOf(tokenId) == address(0)) {
             revert("ParcelNFT: Parcel does not exist");
