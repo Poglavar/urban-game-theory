@@ -67,8 +67,7 @@ function pickAnAddress() {
         process.env.ACCOUNT_2_ADDRESS,
         process.env.ACCOUNT_3_ADDRESS,
         process.env.ACCOUNT_4_ADDRESS,
-        process.env.ACCOUNT_5_ADDRESS,
-        process.env.ACCOUNT_6_ADDRESS
+        process.env.ACCOUNT_5_ADDRESS
     ]
     return addressList[Math.floor(Math.random() * addressList.length)];
 }
@@ -92,15 +91,16 @@ async function mintParcelNFTs(buildings) {
         const building = buildings[i];
         try {
             // Prepare mint parameters
-            // const to = wallet.address;
             const to = pickAnAddress();
             const osmId = BigInt(building.id);
 
             console.log(`\nMinting NFT ${i + 1} of ${buildings.length}`);
             console.log(`Building ID: ${building.id}`);
             console.log(`Minting to: ${to}`);
-            // Mint the NFT
-            const tx = await contract.mint(to, osmId);
+            // Get the latest nonce for this transaction
+            const nonce = await wallet.getNonce();
+            // Mint the NFT with explicit nonce
+            const tx = await contract.mint(to, osmId, { nonce });
             console.log(`Transaction submitted: ${BLOCK_EXPLORER_URL}${tx.hash}`);
 
             // Wait for confirmation
